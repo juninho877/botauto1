@@ -1,0 +1,36 @@
+{
+    "name": "sistema/whatsapp-saas",
+    "description": "Sistema SaaS WhatsApp com Agendamento Inteligente",
+    "type": "project",
+    "keywords": ["whatsapp", "saas", "agendamento", "ia", "chatbot"],
+    "license": "proprietary",
+    "authors": [
+        {
+            "name": "Sistema SaaS",
+            "email": "dev@sistema.com"
+        }
+    ],
+    "require": {
+        "php": ">=8.0",
+        "ext-pdo": "*",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/",
+            "App\\Models\\": "models/",
+            "App\\Controllers\\": "controllers/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "scripts": {
+        "post-install-cmd": [
+            "@php -r \"copy('.env.example', '.env');\""
+        ]
+    }
+}
