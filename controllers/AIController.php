@@ -1,7 +1,7 @@
 <?php
-require_once 'config/config.php';
-require_once 'models/Appointment.php';
-require_once 'models/Service.php';
+require_once __DIR__ . '/../config/config.php';
+require_once __DIR__ . '/../models/Appointment.php';
+require_once __DIR__ . '/../models/Service.php';
 
 class AIController {
     private $appointmentModel;

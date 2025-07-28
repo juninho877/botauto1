@@ -1,4 +1,7 @@
 <?php
+// Include database configuration first
+require_once __DIR__ . '/database.php';
+
 // Configurações gerais do sistema
 define('BASE_URL', 'http://localhost');
 define('BASE_PATH', dirname(__DIR__));
