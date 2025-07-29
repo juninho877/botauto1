@@ -712,6 +712,7 @@ class CompanyController {
             error_log("Erro ao conectar WhatsApp: " . $e->getMessage());
             return ['success' => false, 'message' => 'Erro interno ao conectar'];
         }
+        }
     }
     
     private function restartWhatsAppConnection($config, $instance_name) {
