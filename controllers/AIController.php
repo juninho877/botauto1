@@ -60,178 +60,6 @@ class AIController {
     }
     
     public function buildPrompt($message, $context) {
-        $empresa = $context['empresa'];
-        $servicos = $context['servicos'];
-        $agendamentos_recentes = $context['agendamentos_recentes'];
-        $horario_funcionamento = $context['horario_funcionamento'];
-        $conversa_anterior = $context['conversa_anterior'] ?? [];
-        
-        $prompt = "Você é o assistente virtual da empresa '{$empresa['nome']}'.\n\n";
-        
-        $prompt .= "INFORMAÇÕES DA EMPRESA:\n";
-        $prompt .= "- Nome: {$empresa['nome']}\n";
-        if ($empresa['telefone']) {
-            $prompt .= "- Telefone: {$empresa['telefone']}\n";
-        }
-        
-        $prompt .= "\nSERVIÇOS DISPONÍVEIS:\n";
-        foreach ($servicos as $service) {
-            $prompt .= "- {$service['nome']}: {$service['duracao_minutos']} minutos, R$ " . number_format($service['preco'], 2, ',', '.') . "\n";
-            if ($service['descricao']) {
-                $prompt .= "  Descrição: {$service['descricao']}\n";
-            }
-        }
-        
-        $prompt .= "\nHORÁRIO DE FUNCIONAMENTO:\n";
-        $dias = [
-            'segunda' => 'Segunda-feira',
-            'terca' => 'Terça-feira',
-            'quarta' => 'Quarta-feira',
-            'quinta' => 'Quinta-feira',
-            'sexta' => 'Sexta-feira',
-            'sabado' => 'Sábado',
-            'domingo' => 'Domingo'
-        ];
-        
-        foreach ($dias as $key => $dia) {
-            if (isset($horario_funcionamento[$key])) {
-                if (isset($horario_funcionamento[$key]['fechado'])) {
-                    $prompt .= "- $dia: Fechado\n";
-                } else {
-                    $prompt .= "- $dia: {$horario_funcionamento[$key]['inicio']} às {$horario_funcionamento[$key]['fim']}\n";
-                }
-            }
-        }
-        
-        if (!empty($agendamentos_recentes)) {
-            $prompt .= "\nAGENDAMENTOS RECENTES DO CLIENTE:\n";
-            foreach ($agendamentos_recentes as $appointment) {
-                $data = date('d/m/Y', strtotime($appointment['data_agendamento']));
-                $hora = substr($appointment['hora_inicio'], 0, 5);
-                $prompt .= "- {$appointment['servico_nome']} em $data às $hora (Status: {$appointment['status']})\n";
-            }
-        }
-        
-        if (!empty($conversa_anterior)) {
-            $prompt .= "\nCONTEXTO DA CONVERSA ANTERIOR:\n";
-            foreach ($conversa_anterior as $msg) {
-                $tipo = $msg['tipo'] === 'recebida' ? 'Cliente' : 'Assistente';
-                $prompt .= "- $tipo: {$msg['conteudo']}\n";
-            }
-        }
-        
-        $prompt .= "\nMENSAGEM DO CLIENTE: \"$message\"\n\n";
-        
-        $prompt .= "INSTRUÇÕES:\n";
-        $prompt .= "1. Responda de forma natural, amigável e profissional\n";
-        $prompt .= "2. Use emojis quando apropriado para tornar a conversa mais calorosa\n";
-        $prompt .= "3. Considere o contexto da conversa anterior para dar continuidade natural\n";
-        $prompt .= "4. Se o cliente quiser agendar, siga um fluxo estruturado: serviço → data → horário → nome\n";
-        $prompt .= "5. Se não tiver todas as informações para agendamento, pergunte uma coisa por vez\n";
-        $prompt .= "6. Seja prestativo e tente resolver a necessidade do cliente\n";
-        $prompt .= "7. Mantenha as respostas concisas mas informativas\n";
-        $prompt .= "8. Para agendamentos, sempre confirme os detalhes antes de finalizar\n\n";
-        
-        $prompt .= "Responda agora à mensagem do cliente:";
-        
-        return $prompt;
-    }
-    
-    private function extractDate($message) {
-        $today = new DateTime();
-        $message_lower = strtolower($message);
-        
-        // Hoje, amanhã, depois de amanhã
-        if (strpos($message_lower, 'hoje') !== false) {
-            return $today->format('Y-m-d');
-        }
-        
-        if (strpos($message_lower, 'amanhã') !== false || strpos($message_lower, 'amanha') !== false) {
-            return $today->modify('+1 day')->format('Y-m-d');
-        }
-        
-        if (strpos($message_lower, 'depois de amanhã') !== false || strpos($message_lower, 'depois de amanha') !== false) {
-            return $today->modify('+2 days')->format('Y-m-d');
-        }
-        
-        // Dias da semana
-        $days = [
-            'segunda' => 'next monday',
-            'terça' => 'next tuesday',
-            'terca' => 'next tuesday',
-            'quarta' => 'next wednesday',
-            'quinta' => 'next thursday',
-            'sexta' => 'next friday',
-            'sábado' => 'next saturday',
-            'sabado' => 'next saturday',
-            'domingo' => 'next sunday'
-        ];
-        
-        foreach ($days as $day_pt => $day_en) {
-            if (strpos($message_lower, $day_pt) !== false) {
-                $date = new DateTime($day_en);
-                // Se o dia já passou esta semana, pegar da próxima
-                if ($date <= $today) {
-                    $date->modify('+1 week');
-                }
-                return $date->format('Y-m-d');
-            }
-        }
-        
-        // Formato DD/MM ou DD/MM/YYYY
-        if (preg_match('/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/', $message, $matches)) {
-            $day = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
-            $month = str_pad($matches[2], 2, '0', STR_PAD_LEFT);
-            $year = isset($matches[3]) ? $matches[3] : date('Y');
-            
-            if (strlen($year) == 2) {
-                $year = '20' . $year;
-            }
-            
-            $date = DateTime::createFromFormat('Y-m-d', "$year-$month-$day");
-            if ($date && $date >= $today) {
-                return $date->format('Y-m-d');
-            }
-        }
-        
-        return null;
-    }
-    
-    private function extractTime($message) {
-        // Formato HH:MM
-        if (preg_match('/(\d{1,2}):(\d{2})/', $message, $matches)) {
-            $hour = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
-            $minute = $matches[2];
-            return "$hour:$minute";
-        }
-        
-        // Formato HHh ou HH horas
-        if (preg_match('/(\d{1,2})h(?:oras)?/', $message, $matches)) {
-            $hour = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
-            return "$hour:00";
-        }
-        
-        // Horários por extenso
-        $times = [
-            'meio dia' => '12:00',
-            'meio-dia' => '12:00',
-            'manhã' => '09:00',
-            'manha' => '09:00',
-            'tarde' => '14:00',
-            'noite' => '19:00'
-        ];
-        
-        $message_lower = strtolower($message);
-        foreach ($times as $text => $time) {
-            if (strpos($message_lower, $text) !== false) {
-                return $time;
-            }
-        }
-        
-        return null;
-    }
-    
-    public function processScheduleRequest($intent, $context, $phone) {
     public function processScheduleRequest($message, $context, $phone, $flow_data = []) {
         try {
             error_log("WHATSAPP AI FLOW: Processando passo - " . json_encode($flow_data));
@@ -486,83 +314,6 @@ class AIController {
         return null;
     }
     
-    private function extractDate($message) {
-        $today = new DateTime();
-        $message_lower = strtolower($message);
-        
-        // Hoje, amanhã
-        if (strpos($message_lower, 'hoje') !== false) {
-            return $today->format('Y-m-d');
-        }
-        
-        if (strpos($message_lower, 'amanhã') !== false || strpos($message_lower, 'amanha') !== false) {
-            return $today->modify('+1 day')->format('Y-m-d');
-        }
-        
-        // Dias da semana
-        $days = [
-            'segunda' => 'next monday',
-            'terça' => 'next tuesday', 'terca' => 'next tuesday',
-            'quarta' => 'next wednesday',
-            'quinta' => 'next thursday',
-            'sexta' => 'next friday',
-            'sábado' => 'next saturday', 'sabado' => 'next saturday',
-            'domingo' => 'next sunday'
-        ];
-        
-        foreach ($days as $day_pt => $day_en) {
-            if (strpos($message_lower, $day_pt) !== false) {
-                $date = new DateTime($day_en);
-                if ($date <= $today) {
-                    $date->modify('+1 week');
-                }
-                return $date->format('Y-m-d');
-            }
-        }
-        
-        // Formato DD/MM
-        if (preg_match('/(\d{1,2})\/(\d{1,2})/', $message, $matches)) {
-            $day = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
-            $month = str_pad($matches[2], 2, '0', STR_PAD_LEFT);
-            $year = date('Y');
-            
-            $date = DateTime::createFromFormat('Y-m-d', "$year-$month-$day");
-            if ($date && $date >= $today) {
-                return $date->format('Y-m-d');
-            }
-        }
-        
-        return null;
-    }
-    
-    private function extractTime($message) {
-        // Formato HH:MM
-        if (preg_match('/(\d{1,2}):(\d{2})/', $message, $matches)) {
-            return str_pad($matches[1], 2, '0', STR_PAD_LEFT) . ':' . $matches[2];
-        }
-        
-        // Formato HHh
-        if (preg_match('/(\d{1,2})h/', $message, $matches)) {
-            return str_pad($matches[1], 2, '0', STR_PAD_LEFT) . ':00';
-        }
-        
-        // Horários específicos mencionados
-        $message_lower = strtolower($message);
-        $times = [
-            '8' => '08:00', '9' => '09:00', '10' => '10:00', '11' => '11:00',
-            '12' => '12:00', '13' => '13:00', '14' => '14:00', '15' => '15:00',
-            '16' => '16:00', '17' => '17:00', '18' => '18:00', '19' => '19:00'
-        ];
-        
-        foreach ($times as $hour => $time) {
-            if (strpos($message, $hour) !== false) {
-                return $time;
-            }
-        }
-        
-        return null;
-    }
-    
     public function buildPrompt($message, $context) {
         $empresa = $context['empresa'];
         $servicos = $context['servicos'];
@@ -635,83 +386,119 @@ class AIController {
         $prompt .= "6. Seja prestativo e tente resolver a necessidade do cliente\n";
         $prompt .= "7. Mantenha as respostas concisas mas informativas\n";
         $prompt .= "8. Para agendamentos, sempre confirme os detalhes antes de finalizar\n";
-        $prompt .= "9. Se o cliente já foi saudado recentemente, evite repetir saudações completas e vá direto ao ponto ou faça uma pergunta de acompanhamento\n\n";
+        $prompt .= "9. Se o cliente já foi saudado recentemente, evite repetir saudações completas e vá direto ao ponto ou faça uma pergunta de acompanhamento\n";
+        $prompt .= "10. Mantenha um tom natural e evite repetições desnecessárias\n\n";
         
         $prompt .= "Responda agora à mensagem do cliente:";
         
         return $prompt;
     }
-            
-            if (!isset($intent['time'])) {
-                // Mostrar horários disponíveis
-                $available_slots = $this->appointmentModel->getAvailableSlots(
-                    $context['empresa']['id'],
-                    $intent['service_id'], 
-                    $intent['date']
-                );
-                
-                if (empty($available_slots)) {
-                    $response['message'] = "Infelizmente não temos horários disponíveis para {$intent['date']}. Gostaria de escolher outra data?";
-                    $response['status'] = 'no_availability';
-                    return $response;
-                }
-                
-                $response['message'] = "Horários disponíveis para {$intent['date']}:\n\n";
-                foreach ($available_slots as $slot) {
-                    $response['message'] .= "• $slot\n";
-                }
-                $response['message'] .= "\nQual horário prefere?";
-                $response['status'] = 'need_time';
-                return $response;
-            }
-            
-            // Temos todas as informações, criar agendamento
-            $service = $this->serviceModel->getById($intent['service_id']);
-            $start_time = $intent['time'];
-            $end_time = date('H:i', strtotime($start_time . ' +' . $service['duracao_minutos'] . ' minutes'));
-            
-            // Verificar disponibilidade final
-            if (!$this->appointmentModel->checkAvailability($context['empresa']['id'], $intent['date'], $start_time, $end_time)) {
-                $response['message'] = "Desculpe, esse horário não está mais disponível. Gostaria de escolher outro?";
-                $response['status'] = 'conflict';
-                return $response;
-            }
-            
-            // Criar agendamento
-            $appointment_data = [
-                'company_id' => $context['empresa']['id'],
-                'cliente_nome' => 'Cliente WhatsApp', // Será atualizado depois
-                'telefone' => $phone,
-                'service_id' => $intent['service_id'],
-                'data_agendamento' => $intent['date'],
-                'hora_inicio' => $start_time,
-                'hora_fim' => $end_time
-            ];
-            
-            if ($this->appointmentModel->create($appointment_data)) {
-                $response['message'] = "✅ Agendamento confirmado!\n\n";
-                $response['message'] .= "📅 Data: " . date('d/m/Y', strtotime($intent['date'])) . "\n";
-                $response['message'] .= "🕒 Horário: $start_time às $end_time\n";
-                $response['message'] .= "💼 Serviço: {$intent['service_name']}\n";
-                $response['message'] .= "💰 Valor: R$ {$service['preco']}\n\n";
-                $response['message'] .= "Qual é o seu nome para confirmarmos o agendamento?";
-                $response['status'] = 'scheduled';
-                
-                auditLog('whatsapp_appointment_created', "Agendamento criado via WhatsApp para $phone", $context['empresa']['id']);
-            } else {
-                $response['message'] = "Ocorreu um erro ao criar seu agendamento. Tente novamente ou entre em contato conosco.";
-                $response['status'] = 'error';
-            }
-            
-            return $response;
-            
-        } catch (Exception $e) {
-            error_log("Erro ao processar agendamento via IA: " . $e->getMessage());
-            return [
-                'message' => 'Desculpe, ocorreu um erro interno. Tente novamente mais tarde.',
-                'status' => 'error'
-            ];
+    
+    private function extractDate($message) {
+        $today = new DateTime();
+        $message_lower = strtolower($message);
+        
+        // Hoje, amanhã, depois de amanhã
+        if (strpos($message_lower, 'hoje') !== false) {
+            return $today->format('Y-m-d');
         }
+        
+        if (strpos($message_lower, 'amanhã') !== false || strpos($message_lower, 'amanha') !== false) {
+            return $today->modify('+1 day')->format('Y-m-d');
+        }
+        
+        if (strpos($message_lower, 'depois de amanhã') !== false || strpos($message_lower, 'depois de amanha') !== false) {
+            return $today->modify('+2 days')->format('Y-m-d');
+        }
+        
+        // Dias da semana
+        $days = [
+            'segunda' => 'next monday',
+            'terça' => 'next tuesday',
+            'terca' => 'next tuesday',
+            'quarta' => 'next wednesday',
+            'quinta' => 'next thursday',
+            'sexta' => 'next friday',
+            'sábado' => 'next saturday',
+            'sabado' => 'next saturday',
+            'domingo' => 'next sunday'
+        ];
+        
+        foreach ($days as $day_pt => $day_en) {
+            if (strpos($message_lower, $day_pt) !== false) {
+                $date = new DateTime($day_en);
+                // Se o dia já passou esta semana, pegar da próxima
+                if ($date <= $today) {
+                    $date->modify('+1 week');
+                }
+                return $date->format('Y-m-d');
+            }
+        }
+        
+        // Formato DD/MM ou DD/MM/YYYY
+        if (preg_match('/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/', $message, $matches)) {
+            $day = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
+            $month = str_pad($matches[2], 2, '0', STR_PAD_LEFT);
+            $year = isset($matches[3]) ? $matches[3] : date('Y');
+            
+            if (strlen($year) == 2) {
+                $year = '20' . $year;
+            }
+            
+            $date = DateTime::createFromFormat('Y-m-d', "$year-$month-$day");
+            if ($date && $date >= $today) {
+                return $date->format('Y-m-d');
+            }
+        }
+        
+        return null;
+    }
+    
+    private function extractTime($message) {
+        // Formato HH:MM
+        if (preg_match('/(\d{1,2}):(\d{2})/', $message, $matches)) {
+            $hour = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
+            $minute = $matches[2];
+            return "$hour:$minute";
+        }
+        
+        // Formato HHh ou HH horas
+        if (preg_match('/(\d{1,2})h(?:oras)?/', $message, $matches)) {
+            $hour = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
+            return "$hour:00";
+        }
+        
+        // Horários específicos mencionados (números simples)
+        $message_lower = strtolower($message);
+        $times = [
+            '8' => '08:00', '9' => '09:00', '10' => '10:00', '11' => '11:00',
+            '12' => '12:00', '13' => '13:00', '14' => '14:00', '15' => '15:00',
+            '16' => '16:00', '17' => '17:00', '18' => '18:00', '19' => '19:00'
+        ];
+        
+        foreach ($times as $hour => $time) {
+            if (strpos($message, $hour) !== false) {
+                return $time;
+            }
+        }
+        
+        // Horários por extenso
+        $times_text = [
+            'meio dia' => '12:00',
+            'meio-dia' => '12:00',
+            'manhã' => '09:00',
+            'manha' => '09:00',
+            'tarde' => '14:00',
+            'noite' => '19:00'
+        ];
+        
+        foreach ($times_text as $text => $time) {
+            if (strpos($message_lower, $text) !== false) {
+                return $time;
+            }
+        }
+        
+        return null;
     }
 }
 ?>
