@@ -2,14 +2,17 @@
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../models/Appointment.php';
 require_once __DIR__ . '/../models/Service.php';
+require_once __DIR__ . '/AIController.php';
 
 class WhatsAppController {
     private $appointmentModel;
     private $serviceModel;
+    private $aiController;
     
     public function __construct() {
         $this->appointmentModel = new Appointment();
         $this->serviceModel = new Service();
+        $this->aiController = new AIController();
     }
     
     public function handleMessageUpsert($messageData) {
@@ -102,10 +105,10 @@ class WhatsAppController {
     
     private function processWithAI($message, $company, $phone) {
         try {
-            // Buscar configurações de IA
             $db = new Database();
             $pdo = $db->getConnection();
             
+            // Buscar configurações de IA
             $stmt = $pdo->query("SELECT * FROM admin_config WHERE id = 1");
             $config = $stmt->fetch();
             
@@ -116,25 +119,62 @@ class WhatsAppController {
             // Determinar qual IA usar
             $ia_tipo = $company['ia_preferida'] === 'padrao' ? $config['ia_padrao'] : $company['ia_preferida'];
             
-            // Contexto da empresa
+            // Criar contexto rico para a IA
             $services = $this->serviceModel->getByCompany($company['id']);
             $recent_appointments = $this->appointmentModel->getByPhone($company['id'], $phone, 3);
             
             $context = [
-                'empresa' => $company['nome'],
-                'telefone_empresa' => $company['telefone'],
+                'empresa' => $company,
                 'servicos' => $services,
                 'agendamentos_recentes' => $recent_appointments,
-                'horario_funcionamento' => json_decode($company['horario_funcionamento'], true)
+                'horario_funcionamento' => json_decode($company['horario_funcionamento'], true),
+                'telefone_cliente' => $phone
             ];
             
+            error_log("WHATSAPP AI: Analisando mensagem: '$message' para empresa: {$company['nome']}");
+            
+            // Analisar intenção do usuário
+            $intent = $this->aiController->analyzeIntent($message, $context);
+            error_log("WHATSAPP AI: Intenção detectada: " . json_encode($intent));
+            
+            // Processar baseado na intenção
+            if (isset($intent['action'])) {
+                switch ($intent['action']) {
+                    case 'schedule':
+                        error_log("WHATSAPP AI: Processando solicitação de agendamento");
+                        $scheduleResponse = $this->aiController->processScheduleRequest($intent, $context, $phone);
+                        if (isset($scheduleResponse['message'])) {
+                            return $scheduleResponse['message'];
+                        }
+                        break;
+                        
+                    case 'cancel':
+                        return $this->handleCancelRequest($context, $phone);
+                        
+                    case 'check_availability':
+                        return $this->handleAvailabilityCheck($intent, $context);
+                        
+                    case 'info':
+                        if ($intent['type'] === 'services') {
+                            return $this->buildServicesInfo($context['servicos']);
+                        }
+                        break;
+                }
+            }
+            
+            // Se não foi uma intenção específica ou falhou, usar IA geral
+            error_log("WHATSAPP AI: Usando IA geral ($ia_tipo) para resposta");
+            
             if ($ia_tipo === 'chatgpt' && !empty($config['openai_key'])) {
-                return $this->processWithChatGPT($message, $context, $config['openai_key']);
+                $prompt = $this->aiController->buildPrompt($message, $context);
+                return $this->processWithChatGPT($prompt, $config['openai_key']);
             } elseif ($ia_tipo === 'gemini' && !empty($config['gemini_key'])) {
-                return $this->processWithGemini($message, $context, $config['gemini_key']);
+                $prompt = $this->aiController->buildPrompt($message, $context);
+                return $this->processWithGemini($prompt, $config['gemini_key']);
             }
             
             // Fallback para resposta simples
+            error_log("WHATSAPP AI: Usando bot simples (sem chaves de IA configuradas)");
             return $this->processWithSimpleBot($message, $context);
             
         } catch (Exception $e) {
@@ -143,15 +183,79 @@ class WhatsAppController {
         }
     }
     
-    private function processWithChatGPT($message, $context, $api_key) {
-        $prompt = $this->buildPrompt($message, $context);
+    private function handleCancelRequest($context, $phone) {
+        $recent_appointments = $context['agendamentos_recentes'];
+        
+        if (empty($recent_appointments)) {
+            return "Não encontrei agendamentos recentes em seu nome. Se você tem um agendamento, por favor me informe mais detalhes como a data ou serviço.";
+        }
+        
+        $response = "📋 Seus agendamentos recentes:\n\n";
+        foreach ($recent_appointments as $index => $appointment) {
+            if ($appointment['status'] !== 'cancelado') {
+                $response .= ($index + 1) . ". {$appointment['servico_nome']}\n";
+                $response .= "   📅 " . date('d/m/Y', strtotime($appointment['data_agendamento'])) . " às " . substr($appointment['hora_inicio'], 0, 5) . "\n";
+                $response .= "   Status: " . ucfirst($appointment['status']) . "\n\n";
+            }
+        }
+        
+        $response .= "Para cancelar, me informe qual agendamento (número) ou a data específica.";
+        return $response;
+    }
+    
+    private function handleAvailabilityCheck($intent, $context) {
+        $date = $intent['date'] ?? date('Y-m-d', strtotime('+1 day'));
+        $service_id = $intent['service_id'] ?? null;
+        
+        if (!$service_id && !empty($context['servicos'])) {
+            $service_id = $context['servicos'][0]['id']; // Usar primeiro serviço como padrão
+        }
+        
+        if ($service_id) {
+            $available_slots = $this->appointmentModel->getAvailableSlots($context['empresa']['id'], $service_id, $date);
+            
+            if (empty($available_slots)) {
+                return "❌ Não temos horários disponíveis para " . date('d/m/Y', strtotime($date)) . ".\n\nGostaria de verificar outra data?";
+            }
+            
+            $response = "✅ Horários disponíveis para " . date('d/m/Y', strtotime($date)) . ":\n\n";
+            foreach ($available_slots as $slot) {
+                $response .= "• $slot\n";
+            }
+            $response .= "\nQual horário prefere?";
+            return $response;
+        }
+        
+        return "Para verificar disponibilidade, preciso saber qual serviço você deseja. Qual serviço tem interesse?";
+    }
+    
+    private function buildServicesInfo($services) {
+        if (empty($services)) {
+            return "Desculpe, não temos serviços cadastrados no momento.";
+        }
+        
+        $response = "💼 Nossos serviços:\n\n";
+        foreach ($services as $service) {
+            $response .= "• *{$service['nome']}*\n";
+            if ($service['descricao']) {
+                $response .= "  {$service['descricao']}\n";
+            }
+            $response .= "  ⏱️ {$service['duracao_minutos']} minutos\n";
+            $response .= "  💰 R$ " . number_format($service['preco'], 2, ',', '.') . "\n\n";
+        }
+        $response .= "Gostaria de agendar algum desses serviços?";
+        return $response;
+    }
+    
+    private function processWithChatGPT($prompt, $api_key) {
+        error_log("WHATSAPP AI: Enviando para ChatGPT: " . substr($prompt, 0, 200) . "...");
         
         $data = [
             'model' => 'gpt-3.5-turbo',
             'messages' => [
                 [
                     'role' => 'system',
-                    'content' => 'Você é um assistente de agendamento para ' . $context['empresa'] . '. Seja prestativo e profissional.'
+                    'content' => 'Você é um assistente de agendamento inteligente. Seja prestativo, profissional e natural na conversa. Use emojis quando apropriado.'
                 ],
                 [
                     'role' => 'user',
@@ -171,21 +275,28 @@ class WhatsAppController {
             'Content-Type: application/json',
             'Authorization: Bearer ' . $api_key
         ]);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         
+        error_log("WHATSAPP AI: ChatGPT HTTP Code: $httpCode");
+        
         if ($httpCode === 200) {
             $result = json_decode($response, true);
-            return $result['choices'][0]['message']['content'] ?? 'Desculpe, não entendi. Pode reformular?';
+            $aiResponse = $result['choices'][0]['message']['content'] ?? 'Desculpe, não entendi. Pode reformular?';
+            error_log("WHATSAPP AI: ChatGPT respondeu: " . substr($aiResponse, 0, 200) . "...");
+            return $aiResponse;
+        } else {
+            error_log("WHATSAPP AI: Erro ChatGPT HTTP $httpCode: $response");
         }
         
-        return $this->processWithSimpleBot($message, $context);
+        return "Desculpe, estou com problemas técnicos. Tente novamente mais tarde.";
     }
     
-    private function processWithGemini($message, $context, $api_key) {
-        $prompt = $this->buildPrompt($message, $context);
+    private function processWithGemini($prompt, $api_key) {
+        error_log("WHATSAPP AI: Enviando para Gemini: " . substr($prompt, 0, 200) . "...");
         
         $data = [
             'contents' => [
@@ -205,37 +316,38 @@ class WhatsAppController {
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
             'Content-Type: application/json'
         ]);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         
+        error_log("WHATSAPP AI: Gemini HTTP Code: $httpCode");
+        
         if ($httpCode === 200) {
             $result = json_decode($response, true);
-            return $result['candidates'][0]['content']['parts'][0]['text'] ?? 'Desculpe, não entendi. Pode reformular?';
+            $aiResponse = $result['candidates'][0]['content']['parts'][0]['text'] ?? 'Desculpe, não entendi. Pode reformular?';
+            error_log("WHATSAPP AI: Gemini respondeu: " . substr($aiResponse, 0, 200) . "...");
+            return $aiResponse;
+        } else {
+            error_log("WHATSAPP AI: Erro Gemini HTTP $httpCode: $response");
         }
         
-        return $this->processWithSimpleBot($message, $context);
+        return "Desculpe, estou com problemas técnicos. Tente novamente mais tarde.";
     }
     
     private function processWithSimpleBot($message, $context) {
+        error_log("WHATSAPP AI: Usando bot simples para: '$message'");
         $message_lower = strtolower($message);
         
         // Saudações
         if (preg_match('/\b(oi|olá|ola|bom dia|boa tarde|boa noite)\b/', $message_lower)) {
-            return "Olá! Bem-vindo(a) ao {$context['empresa']}! 😊\n\nComo posso ajudá-lo(a) hoje? Posso:\n• Mostrar nossos serviços\n• Ajudar com agendamentos\n• Verificar disponibilidade\n\nO que gostaria de fazer?";
+            return "Olá! Bem-vindo(a) ao {$context['empresa']['nome']}! 😊\n\nComo posso ajudá-lo(a) hoje? Posso:\n• Mostrar nossos serviços\n• Ajudar com agendamentos\n• Verificar disponibilidade\n\nO que gostaria de fazer?";
         }
         
         // Solicitar serviços
         if (preg_match('/\b(serviços|serviços|preços|precos|tabela|valores)\b/', $message_lower)) {
-            $response = "📋 Nossos serviços:\n\n";
-            foreach ($context['servicos'] as $service) {
-                $response .= "• {$service['nome']}\n";
-                $response .= "  ⏱️ {$service['duracao_minutos']} minutos\n";
-                $response .= "  💰 R$ " . number_format($service['preco'], 2, ',', '.') . "\n\n";
-            }
-            $response .= "Gostaria de agendar algum serviço?";
-            return $response;
+            return $this->buildServicesInfo($context['servicos']);
         }
         
         // Agendamento
@@ -271,25 +383,12 @@ class WhatsAppController {
         
         // Localização/contato
         if (preg_match('/\b(endereço|endereco|localização|localizacao|onde|telefone|contato)\b/', $message_lower)) {
-            return "📍 Entre em contato conosco:\n\n📞 Telefone: {$context['telefone_empresa']}\n\n💬 Você pode continuar nossa conversa aqui mesmo pelo WhatsApp!\n\nComo posso ajudá-lo(a) mais?";
+            $telefone = $context['empresa']['telefone'] ?: 'Não informado';
+            return "📍 Entre em contato conosco:\n\n📞 Telefone: $telefone\n\n💬 Você pode continuar nossa conversa aqui mesmo pelo WhatsApp!\n\nComo posso ajudá-lo(a) mais?";
         }
         
         // Default
         return "Desculpe, não entendi completamente sua mensagem. 😅\n\nPosso ajudá-lo(a) com:\n• Informações sobre serviços\n• Agendamentos\n• Horário de funcionamento\n• Contato\n\nO que gostaria de saber?";
-    }
-    
-    private function buildPrompt($message, $context) {
-        $prompt = "Cliente disse: \"$message\"\n\n";
-        $prompt .= "Contexto da empresa {$context['empresa']}:\n";
-        $prompt .= "Serviços disponíveis:\n";
-        
-        foreach ($context['servicos'] as $service) {
-            $prompt .= "- {$service['nome']}: {$service['duracao_minutos']}min, R$ {$service['preco']}\n";
-        }
-        
-        $prompt .= "\nResponda de forma natural e prestativa. Se for sobre agendamento, solicite detalhes específicos.";
-        
-        return $prompt;
     }
     
     private function sendMessage($phone, $message, $company) {

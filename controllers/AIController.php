@@ -59,6 +59,74 @@ class AIController {
         return $intent;
     }
     
+    public function buildPrompt($message, $context) {
+        $empresa = $context['empresa'];
+        $servicos = $context['servicos'];
+        $agendamentos_recentes = $context['agendamentos_recentes'];
+        $horario_funcionamento = $context['horario_funcionamento'];
+        
+        $prompt = "Você é o assistente virtual da empresa '{$empresa['nome']}'.\n\n";
+        
+        $prompt .= "INFORMAÇÕES DA EMPRESA:\n";
+        $prompt .= "- Nome: {$empresa['nome']}\n";
+        if ($empresa['telefone']) {
+            $prompt .= "- Telefone: {$empresa['telefone']}\n";
+        }
+        
+        $prompt .= "\nSERVIÇOS DISPONÍVEIS:\n";
+        foreach ($servicos as $service) {
+            $prompt .= "- {$service['nome']}: {$service['duracao_minutos']} minutos, R$ " . number_format($service['preco'], 2, ',', '.') . "\n";
+            if ($service['descricao']) {
+                $prompt .= "  Descrição: {$service['descricao']}\n";
+            }
+        }
+        
+        $prompt .= "\nHORÁRIO DE FUNCIONAMENTO:\n";
+        $dias = [
+            'segunda' => 'Segunda-feira',
+            'terca' => 'Terça-feira',
+            'quarta' => 'Quarta-feira',
+            'quinta' => 'Quinta-feira',
+            'sexta' => 'Sexta-feira',
+            'sabado' => 'Sábado',
+            'domingo' => 'Domingo'
+        ];
+        
+        foreach ($dias as $key => $dia) {
+            if (isset($horario_funcionamento[$key])) {
+                if (isset($horario_funcionamento[$key]['fechado'])) {
+                    $prompt .= "- $dia: Fechado\n";
+                } else {
+                    $prompt .= "- $dia: {$horario_funcionamento[$key]['inicio']} às {$horario_funcionamento[$key]['fim']}\n";
+                }
+            }
+        }
+        
+        if (!empty($agendamentos_recentes)) {
+            $prompt .= "\nAGENDAMENTOS RECENTES DO CLIENTE:\n";
+            foreach ($agendamentos_recentes as $appointment) {
+                $data = date('d/m/Y', strtotime($appointment['data_agendamento']));
+                $hora = substr($appointment['hora_inicio'], 0, 5);
+                $prompt .= "- {$appointment['servico_nome']} em $data às $hora (Status: {$appointment['status']})\n";
+            }
+        }
+        
+        $prompt .= "\nMENSAGEM DO CLIENTE: \"$message\"\n\n";
+        
+        $prompt .= "INSTRUÇÕES:\n";
+        $prompt .= "1. Responda de forma natural, amigável e profissional\n";
+        $prompt .= "2. Use emojis quando apropriado para tornar a conversa mais calorosa\n";
+        $prompt .= "3. Se o cliente quiser agendar, colete: serviço desejado, data preferida e horário\n";
+        $prompt .= "4. Se não tiver todas as informações para agendamento, pergunte o que falta\n";
+        $prompt .= "5. Seja prestativo e tente resolver a necessidade do cliente\n";
+        $prompt .= "6. Mantenha as respostas concisas mas informativas\n";
+        $prompt .= "7. Se o cliente perguntar sobre disponibilidade, explique que você pode verificar com as informações dele\n\n";
+        
+        $prompt .= "Responda agora à mensagem do cliente:";
+        
+        return $prompt;
+    }
+    
     private function extractDate($message) {
         $today = new DateTime();
         $message_lower = strtolower($message);
@@ -176,7 +244,7 @@ class AIController {
             if (!isset($intent['time'])) {
                 // Mostrar horários disponíveis
                 $available_slots = $this->appointmentModel->getAvailableSlots(
-                    $context['empresa']['id'], 
+                    $context['empresa']['id'],
                     $intent['service_id'], 
                     $intent['date']
                 );
