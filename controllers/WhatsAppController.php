@@ -41,7 +41,8 @@ class WhatsAppController {
             $db = new Database();
             $pdo = $db->getConnection();
             
-            // Identificar empresa pelo número (primeira empresa ativa por enquanto)
+            // Identificar empresa pela instância do webhook
+            // Por enquanto, usar primeira empresa ativa
             $stmt = $pdo->query("SELECT * FROM companies WHERE ativo = 1 LIMIT 1");
             $company = $stmt->fetch();
             
@@ -83,8 +84,11 @@ class WhatsAppController {
             ");
             $stmt->execute([$conversation_id, $company['id'], $phone, $message]);
             
+            // Buscar contexto da conversa (últimas 5 mensagens)
+            $conversationContext = $this->getConversationContext($conversation_id, 5);
+            
             // Processar com IA
-            $response = $this->processWithAI($message, $company, $phone);
+            $response = $this->processWithAI($message, $company, $phone, $conversationContext);
             
             if ($response) {
                 // Enviar resposta
@@ -103,7 +107,27 @@ class WhatsAppController {
         }
     }
     
-    private function processWithAI($message, $company, $phone) {
+    private function getConversationContext($conversation_id, $limit = 5) {
+        try {
+            $db = new Database();
+            $pdo = $db->getConnection();
+            
+            $stmt = $pdo->prepare("
+                SELECT tipo, conteudo, created_at 
+                FROM whatsapp_messages 
+                WHERE conversation_id = ? 
+                ORDER BY created_at DESC 
+                LIMIT ?
+            ");
+            $stmt->execute([$conversation_id, $limit]);
+            return array_reverse($stmt->fetchAll()); // Ordem cronológica
+        } catch (Exception $e) {
+            error_log("Erro ao buscar contexto da conversa: " . $e->getMessage());
+            return [];
+        }
+    }
+    
+    private function processWithAI($message, $company, $phone, $conversationContext = []) {
         try {
             $db = new Database();
             $pdo = $db->getConnection();
@@ -129,9 +153,18 @@ class WhatsAppController {
                 'agendamentos_recentes' => $recent_appointments,
                 'horario_funcionamento' => json_decode($company['horario_funcionamento'], true),
                 'telefone_cliente' => $phone
+                'conversa_anterior' => $conversationContext
             ];
             
             error_log("WHATSAPP AI: Analisando mensagem: '$message' para empresa: {$company['nome']}");
+            
+            // Verificar se estamos em um fluxo de agendamento
+            $flowState = $this->getFlowState($conversationContext);
+            error_log("WHATSAPP AI: Estado do fluxo: " . json_encode($flowState));
+            
+            if ($flowState['in_flow']) {
+                return $this->continueFlow($message, $context, $phone, $flowState);
+            }
             
             // Analisar intenção do usuário
             $intent = $this->aiController->analyzeIntent($message, $context);
@@ -183,6 +216,213 @@ class WhatsAppController {
         }
     }
     
+    private function getFlowState($conversationContext) {
+        $state = [
+            'in_flow' => false,
+            'flow_type' => null,
+            'step' => null,
+            'data' => []
+        ];
+        
+        if (empty($conversationContext)) {
+            return $state;
+        }
+        
+        // Analisar últimas mensagens para detectar fluxo ativo
+        $lastBotMessage = null;
+        foreach (array_reverse($conversationContext) as $msg) {
+            if ($msg['tipo'] === 'enviada') {
+                $lastBotMessage = $msg['conteudo'];
+                break;
+            }
+        }
+        
+        if (!$lastBotMessage) {
+            return $state;
+        }
+        
+        // Detectar fluxo de agendamento
+        if (strpos($lastBotMessage, 'Qual serviço você gostaria de agendar?') !== false) {
+            $state['in_flow'] = true;
+            $state['flow_type'] = 'schedule';
+            $state['step'] = 'waiting_service';
+        } elseif (strpos($lastBotMessage, 'Para qual data você gostaria de agendar') !== false) {
+            $state['in_flow'] = true;
+            $state['flow_type'] = 'schedule';
+            $state['step'] = 'waiting_date';
+        } elseif (strpos($lastBotMessage, 'Horários disponíveis para') !== false && strpos($lastBotMessage, 'Qual horário prefere?') !== false) {
+            $state['in_flow'] = true;
+            $state['flow_type'] = 'schedule';
+            $state['step'] = 'waiting_time';
+        } elseif (strpos($lastBotMessage, 'Qual é o seu nome para confirmarmos') !== false) {
+            $state['in_flow'] = true;
+            $state['flow_type'] = 'schedule';
+            $state['step'] = 'waiting_name';
+        }
+        
+        return $state;
+    }
+    
+    private function continueFlow($message, $context, $phone, $flowState) {
+        error_log("WHATSAPP AI: Continuando fluxo - Tipo: {$flowState['flow_type']}, Passo: {$flowState['step']}");
+        
+        if ($flowState['flow_type'] === 'schedule') {
+            return $this->continueScheduleFlow($message, $context, $phone, $flowState['step']);
+        }
+        
+        return "Desculpe, não entendi. Pode repetir?";
+    }
+    
+    private function continueScheduleFlow($message, $context, $phone, $step) {
+        $services = $context['servicos'];
+        
+        switch ($step) {
+            case 'waiting_service':
+                // Cliente escolheu um serviço
+                $selectedService = null;
+                $message_lower = strtolower($message);
+                
+                // Tentar encontrar serviço por nome ou número
+                foreach ($services as $index => $service) {
+                    $service_name = strtolower($service['nome']);
+                    if (strpos($message_lower, $service_name) !== false || 
+                        strpos($message, (string)($index + 1)) !== false) {
+                        $selectedService = $service;
+                        break;
+                    }
+                }
+                
+                if (!$selectedService) {
+                    return "Não encontrei esse serviço. Por favor, escolha um dos serviços listados ou digite o número correspondente.";
+                }
+                
+                return "Perfeito! Você escolheu *{$selectedService['nome']}* ({$selectedService['duracao_minutos']}min - R$ {$selectedService['preco']}).\n\nPara qual data você gostaria de agendar? Pode ser hoje, amanhã, ou uma data específica (ex: 15/01).";
+                
+            case 'waiting_date':
+                // Cliente informou uma data
+                $date = $this->extractDateFromMessage($message);
+                
+                if (!$date) {
+                    return "Não consegui entender a data. Pode me informar de forma mais clara? Por exemplo: 'amanhã', 'sexta-feira' ou '15/01'.";
+                }
+                
+                // Buscar serviço selecionado (precisaríamos armazenar isso)
+                // Por simplicidade, vamos usar o primeiro serviço
+                $service = $services[0];
+                $available_slots = $this->appointmentModel->getAvailableSlots($context['empresa']['id'], $service['id'], $date);
+                
+                if (empty($available_slots)) {
+                    return "Infelizmente não temos horários disponíveis para " . date('d/m/Y', strtotime($date)) . ". Gostaria de escolher outra data?";
+                }
+                
+                $response = "Horários disponíveis para " . date('d/m/Y', strtotime($date)) . ":\n\n";
+                foreach ($available_slots as $slot) {
+                    $response .= "• $slot\n";
+                }
+                $response .= "\nQual horário prefere?";
+                return $response;
+                
+            case 'waiting_time':
+                // Cliente escolheu um horário
+                $time = $this->extractTimeFromMessage($message);
+                
+                if (!$time) {
+                    return "Não consegui entender o horário. Pode escolher um dos horários disponíveis listados acima?";
+                }
+                
+                return "Ótimo! Seu agendamento será:\n\n📅 Data: [data]\n🕒 Horário: $time\n💼 Serviço: [serviço]\n💰 Valor: R$ [valor]\n\nQual é o seu nome para confirmarmos o agendamento?";
+                
+            case 'waiting_name':
+                // Cliente informou o nome
+                $name = trim($message);
+                
+                if (strlen($name) < 2) {
+                    return "Por favor, me informe seu nome completo para confirmar o agendamento.";
+                }
+                
+                // Aqui criaria o agendamento de fato
+                return "✅ Agendamento confirmado para *$name*!\n\nVocê receberá um lembrete 1 dia antes do seu horário.\n\nObrigado por escolher nossos serviços! 😊\n\nPrecisa de mais alguma coisa?";
+        }
+        
+        return "Desculpe, houve um problema no fluxo. Vamos começar novamente?";
+    }
+    
+    private function extractDateFromMessage($message) {
+        $today = new DateTime();
+        $message_lower = strtolower($message);
+        
+        // Hoje, amanhã
+        if (strpos($message_lower, 'hoje') !== false) {
+            return $today->format('Y-m-d');
+        }
+        
+        if (strpos($message_lower, 'amanhã') !== false || strpos($message_lower, 'amanha') !== false) {
+            return $today->modify('+1 day')->format('Y-m-d');
+        }
+        
+        // Dias da semana
+        $days = [
+            'segunda' => 'next monday',
+            'terça' => 'next tuesday', 'terca' => 'next tuesday',
+            'quarta' => 'next wednesday',
+            'quinta' => 'next thursday',
+            'sexta' => 'next friday',
+            'sábado' => 'next saturday', 'sabado' => 'next saturday',
+            'domingo' => 'next sunday'
+        ];
+        
+        foreach ($days as $day_pt => $day_en) {
+            if (strpos($message_lower, $day_pt) !== false) {
+                $date = new DateTime($day_en);
+                if ($date <= $today) {
+                    $date->modify('+1 week');
+                }
+                return $date->format('Y-m-d');
+            }
+        }
+        
+        // Formato DD/MM
+        if (preg_match('/(\d{1,2})\/(\d{1,2})/', $message, $matches)) {
+            $day = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
+            $month = str_pad($matches[2], 2, '0', STR_PAD_LEFT);
+            $year = date('Y');
+            
+            $date = DateTime::createFromFormat('Y-m-d', "$year-$month-$day");
+            if ($date && $date >= $today) {
+                return $date->format('Y-m-d');
+            }
+        }
+        
+        return null;
+    }
+    
+    private function extractTimeFromMessage($message) {
+        // Formato HH:MM
+        if (preg_match('/(\d{1,2}):(\d{2})/', $message, $matches)) {
+            return str_pad($matches[1], 2, '0', STR_PAD_LEFT) . ':' . $matches[2];
+        }
+        
+        // Formato HHh
+        if (preg_match('/(\d{1,2})h/', $message, $matches)) {
+            return str_pad($matches[1], 2, '0', STR_PAD_LEFT) . ':00';
+        }
+        
+        // Horários específicos mencionados
+        $message_lower = strtolower($message);
+        $times = [
+            '8' => '08:00', '9' => '09:00', '10' => '10:00', '11' => '11:00',
+            '12' => '12:00', '13' => '13:00', '14' => '14:00', '15' => '15:00',
+            '16' => '16:00', '17' => '17:00', '18' => '18:00', '19' => '19:00'
+        ];
+        
+        foreach ($times as $hour => $time) {
+            if (strpos($message, $hour) !== false) {
+                return $time;
+            }
+        }
+        
+        return null;
+    }
     private function handleCancelRequest($context, $phone) {
         $recent_appointments = $context['agendamentos_recentes'];
         

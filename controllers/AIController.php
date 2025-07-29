@@ -64,6 +64,7 @@ class AIController {
         $servicos = $context['servicos'];
         $agendamentos_recentes = $context['agendamentos_recentes'];
         $horario_funcionamento = $context['horario_funcionamento'];
+        $conversa_anterior = $context['conversa_anterior'] ?? [];
         
         $prompt = "Você é o assistente virtual da empresa '{$empresa['nome']}'.\n\n";
         
@@ -111,16 +112,25 @@ class AIController {
             }
         }
         
+        if (!empty($conversa_anterior)) {
+            $prompt .= "\nCONTEXTO DA CONVERSA ANTERIOR:\n";
+            foreach ($conversa_anterior as $msg) {
+                $tipo = $msg['tipo'] === 'recebida' ? 'Cliente' : 'Assistente';
+                $prompt .= "- $tipo: {$msg['conteudo']}\n";
+            }
+        }
+        
         $prompt .= "\nMENSAGEM DO CLIENTE: \"$message\"\n\n";
         
         $prompt .= "INSTRUÇÕES:\n";
         $prompt .= "1. Responda de forma natural, amigável e profissional\n";
         $prompt .= "2. Use emojis quando apropriado para tornar a conversa mais calorosa\n";
-        $prompt .= "3. Se o cliente quiser agendar, colete: serviço desejado, data preferida e horário\n";
-        $prompt .= "4. Se não tiver todas as informações para agendamento, pergunte o que falta\n";
-        $prompt .= "5. Seja prestativo e tente resolver a necessidade do cliente\n";
-        $prompt .= "6. Mantenha as respostas concisas mas informativas\n";
-        $prompt .= "7. Se o cliente perguntar sobre disponibilidade, explique que você pode verificar com as informações dele\n\n";
+        $prompt .= "3. Considere o contexto da conversa anterior para dar continuidade natural\n";
+        $prompt .= "4. Se o cliente quiser agendar, siga um fluxo estruturado: serviço → data → horário → nome\n";
+        $prompt .= "5. Se não tiver todas as informações para agendamento, pergunte uma coisa por vez\n";
+        $prompt .= "6. Seja prestativo e tente resolver a necessidade do cliente\n";
+        $prompt .= "7. Mantenha as respostas concisas mas informativas\n";
+        $prompt .= "8. Para agendamentos, sempre confirme os detalhes antes de finalizar\n\n";
         
         $prompt .= "Responda agora à mensagem do cliente:";
         
