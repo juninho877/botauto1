@@ -10,7 +10,7 @@ $path = rtrim($path, '/');
 if (empty($path)) $path = '/';
 
 // Rotas públicas (não precisam de autenticação)
-$publicRoutes = ['/', '/login', '/register'];
+$publicRoutes = ['/', '/login', '/register', '/webhook/whatsapp'];
 
 // Verificar autenticação para rotas protegidas
 if (!in_array($path, $publicRoutes)) {
@@ -67,6 +67,13 @@ try {
         case '/admin/logs':
             $controller = new AdminController();
             $controller->logs();
+            break;
+            
+        // Webhook WhatsApp
+        case '/webhook/whatsapp':
+            require_once __DIR__ . '/../controllers/WhatsAppController.php';
+            $controller = new WhatsAppController();
+            $controller->processWebhook();
             break;
             
         // Rotas Company (Empresa)

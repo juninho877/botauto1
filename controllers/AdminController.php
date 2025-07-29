@@ -46,19 +46,16 @@ class AdminController {
             $stmt = $pdo->query("SELECT nome, email, created_at FROM companies ORDER BY created_at DESC LIMIT 5");
             $stats['empresas_recentes'] = $stmt->fetchAll();
             
-            include 'views/admin/dashboard.php';
             include BASE_PATH . '/views/admin/dashboard.php';
         } catch (Exception $e) {
             $_SESSION['error'] = 'Erro ao carregar dashboard';
             error_log("Erro no dashboard admin: " . $e->getMessage());
-            include 'views/admin/dashboard.php';
             include BASE_PATH . '/views/admin/dashboard.php';
         }
     }
     
     public function companies() {
         $companies = $this->userModel->getCompanies(false);
-        include 'views/admin/companies.php';
         include BASE_PATH . '/views/admin/companies.php';
     }
     
@@ -157,12 +154,10 @@ class AdminController {
             $stmt = $pdo->query("SELECT * FROM admin_config WHERE id = 1");
             $config = $stmt->fetch();
             
-            include 'views/admin/settings.php';
             include BASE_PATH . '/views/admin/settings.php';
         } catch (Exception $e) {
             $_SESSION['error'] = 'Erro ao carregar configurações';
             error_log("Erro nas configurações admin: " . $e->getMessage());
-            include 'views/admin/settings.php';
             include BASE_PATH . '/views/admin/settings.php';
         }
     }
@@ -191,12 +186,10 @@ class AdminController {
             $total = $stmt->fetch()['total'];
             $totalPages = ceil($total / $limit);
             
-            include 'views/admin/logs.php';
             include BASE_PATH . '/views/admin/logs.php';
         } catch (Exception $e) {
             $_SESSION['error'] = 'Erro ao carregar logs';
             error_log("Erro nos logs admin: " . $e->getMessage());
-            include 'views/admin/logs.php';
             include BASE_PATH . '/views/admin/logs.php';
         }
     }

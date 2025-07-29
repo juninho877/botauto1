@@ -44,7 +44,6 @@ class AuthController {
             }
         }
         
-        include 'views/auth/login.php';
         include BASE_PATH . '/views/auth/login.php';
     }
     
@@ -111,7 +110,6 @@ class AuthController {
             }
         }
         
-        include 'views/auth/register.php';
         include BASE_PATH . '/views/auth/register.php';
     }
 }
