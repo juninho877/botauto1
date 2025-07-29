@@ -11,15 +11,13 @@ class Appointment {
     
     public function create($data) {
         try {
-            error_log("APPOINTMENT CREATE: Tentando criar agendamento com dados: " . json_encode($data));
-            
             $stmt = $this->pdo->prepare("
                 INSERT INTO appointments (company_id, cliente_nome, telefone, service_id, 
                                         data_agendamento, hora_inicio, hora_fim, observacoes) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ");
             
-            $result = $stmt->execute([
+            return $stmt->execute([
                 $data['company_id'],
                 $data['cliente_nome'],
                 $data['telefone'],
@@ -29,20 +27,8 @@ class Appointment {
                 $data['hora_fim'],
                 $data['observacoes'] ?? ''
             ]);
-            
-            if ($result) {
-                $appointment_id = $this->pdo->lastInsertId();
-                error_log("APPOINTMENT CREATE: ✅ Agendamento criado com sucesso! ID: $appointment_id");
-                error_log("APPOINTMENT CREATE: Cliente: {$data['cliente_nome']}, Telefone: {$data['telefone']}, Data: {$data['data_agendamento']}, Hora: {$data['hora_inicio']}");
-                return true;
-            } else {
-                error_log("APPOINTMENT CREATE: ❌ Falha na execução da query");
-                error_log("APPOINTMENT CREATE: Erro PDO: " . json_encode($stmt->errorInfo()));
-                return false;
-            }
         } catch (Exception $e) {
-            error_log("APPOINTMENT CREATE: ❌ Exception: " . $e->getMessage());
-            error_log("APPOINTMENT CREATE: Dados que causaram erro: " . json_encode($data));
+            error_log("Erro ao criar agendamento: " . $e->getMessage());
             return false;
         }
     }
