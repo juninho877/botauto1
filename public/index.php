@@ -9,8 +9,28 @@ $path = parse_url($request, PHP_URL_PATH);
 $path = rtrim($path, '/');
 if (empty($path)) $path = '/';
 
+// Tratamento especial para webhooks - qualquer URL que comece com /webhook/
+if (strpos($path, '/webhook/') === 0) {
+    // Extrair o arquivo do webhook da URL
+    $webhookFile = substr($path, 9); // Remove '/webhook/' do início
+    if (empty($webhookFile)) {
+        $webhookFile = 'index.php'; // Arquivo padrão se não especificado
+    }
+    
+    $webhookPath = __DIR__ . '/../webhook/' . $webhookFile;
+    
+    if (file_exists($webhookPath)) {
+        require_once $webhookPath;
+        exit;
+    } else {
+        http_response_code(404);
+        echo json_encode(['error' => 'Webhook not found']);
+        exit;
+    }
+}
+
 // Rotas públicas (não precisam de autenticação)
-$publicRoutes = ['/', '/login', '/register', '/webhook/whatsapp.php'];
+$publicRoutes = ['/', '/login', '/register'];
 
 // Verificar autenticação para rotas protegidas
 if (!in_array($path, $publicRoutes)) {
@@ -37,11 +57,6 @@ try {
             $controller = new AuthController();
             $controller->logout();
             break;
-            
-        // Webhook WhatsApp
-        case '/webhook/whatsapp.php':
-            require_once __DIR__ . '/../webhook/whatsapp.php';
-            exit;
             
         // Rotas Admin
         case '/admin/dashboard':
