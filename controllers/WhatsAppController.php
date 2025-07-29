@@ -301,32 +301,61 @@ class WhatsAppController {
             $config = $stmt->fetch();
             
             if (!$config) {
+                error_log("WHATSAPP SEND ERROR: Configurações da API não encontradas no banco de dados");
                 return false;
             }
+            
+            // Log das configurações (sem expor o token completo)
+            $masked_token = substr($config['api_whatsapp_token'], 0, 8) . '***';
+            error_log("WHATSAPP SEND: Tentando enviar mensagem para $phone via {$config['api_whatsapp_url']} com token $masked_token");
+            error_log("WHATSAPP SEND: Instância: {$company['whatsapp_instance']}");
+            error_log("WHATSAPP SEND: Mensagem: " . substr($message, 0, 100) . (strlen($message) > 100 ? '...' : ''));
             
             $data = [
                 'number' => $phone,
                 'text' => $message
             ];
             
+            $api_url = rtrim($config['api_whatsapp_url'], '/') . '/message/sendText/' . $company['whatsapp_instance'];
+            error_log("WHATSAPP SEND: URL completa: $api_url");
+            error_log("WHATSAPP SEND: Dados enviados: " . json_encode($data));
+            
             $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $config['api_whatsapp_url'] . '/message/sendText/' . $company['whatsapp_instance']);
+            curl_setopt($ch, CURLOPT_URL, $api_url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_POST, true);
             curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
                 'Content-Type: application/json',
-                'Authorization: Bearer ' . $config['api_whatsapp_token']
+                'apikey: ' . $config['api_whatsapp_token']
             ]);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
             
             $response = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
             curl_close($ch);
             
-            return $httpCode === 200;
+            // Log detalhado da resposta
+            error_log("WHATSAPP SEND: HTTP Code: $httpCode");
+            if ($curlError) {
+                error_log("WHATSAPP SEND: cURL Error: $curlError");
+            }
+            error_log("WHATSAPP SEND: Resposta da API: $response");
+            
+            if ($httpCode === 200 || $httpCode === 201) {
+                error_log("WHATSAPP SEND: ✅ Mensagem enviada com sucesso para $phone");
+                return true;
+            } else {
+                error_log("WHATSAPP SEND: ❌ Falha no envio - HTTP $httpCode: $response");
+                return false;
+            }
             
         } catch (Exception $e) {
-            error_log("Erro ao enviar mensagem WhatsApp: " . $e->getMessage());
+            error_log("WHATSAPP SEND: ❌ Exception: " . $e->getMessage());
+            error_log("WHATSAPP SEND: Stack trace: " . $e->getTraceAsString());
             return false;
         }
     }
