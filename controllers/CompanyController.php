@@ -334,7 +334,7 @@ class CompanyController {
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
                 'Content-Type: application/json',
-                'Authorization: Bearer ' . $api_token
+                'apikey: ' . $api_token
             ]);
             curl_setopt($ch, CURLOPT_TIMEOUT, 30);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
@@ -383,10 +383,43 @@ class CompanyController {
                 
                 $create_data = [
                     'instanceName' => $instance_name,
+                    'number' => $phone,
+                    'integration' => 'WHATSAPP-BAILEYS',
                     'qrcode' => true,
-                    'webhook' => $webhook_url,
-                    'webhookByEvents' => false,
-                    'webhookBase64' => false
+                    'rejectCall' => true,
+                    'msgCall' => 'Chamadas não são aceitas neste número.',
+                    'groupsIgnore' => false,
+                    'alwaysOnline' => true,
+                    'readMessages' => true,
+                    'readStatus' => true,
+                    'syncFullHistory' => false,
+                    'webhook' => [
+                        'url' => $webhook_url,
+                        'byEvents' => true,
+                        'base64' => true,
+                        'headers' => [
+                            'Content-Type' => 'application/json'
+                        ],
+                        'events' => [
+                            'MESSAGES_UPSERT',
+                            'MESSAGES_UPDATE',
+                            'MESSAGES_DELETE',
+                            'SEND_MESSAGE',
+                            'CONTACTS_UPDATE',
+                            'CONTACTS_UPSERT',
+                            'PRESENCE_UPDATE',
+                            'CHATS_UPDATE',
+                            'CHATS_UPSERT',
+                            'CHATS_DELETE',
+                            'GROUPS_UPSERT',
+                            'GROUP_UPDATE',
+                            'GROUP_PARTICIPANTS_UPDATE',
+                            'CONNECTION_UPDATE',
+                            'LABELS_EDIT',
+                            'LABELS_ASSOCIATION',
+                            'CALL'
+                        ]
+                    ]
                 ];
                 
                 error_log("Creating instance with data: " . json_encode($create_data));
@@ -398,7 +431,7 @@ class CompanyController {
                 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($create_data));
                 curl_setopt($ch, CURLOPT_HTTPHEADER, [
                     'Content-Type: application/json',
-                    'Authorization: Bearer ' . $api_token
+                    'apikey: ' . $api_token
                 ]);
                 curl_setopt($ch, CURLOPT_TIMEOUT, 30);
                 curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
