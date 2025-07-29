@@ -318,10 +318,6 @@ class AIController {
             $prompt .= "- Telefone: {$empresa['telefone']}\n";
         }
         
-        $prompt .= "\nINFORMAÇÕES DO CLIENTE:\n";
-        $prompt .= "- Telefone: {$context['telefone_cliente']}\n";
-        $prompt .= "- IMPORTANTE: O telefone do cliente JÁ É CONHECIDO. NUNCA pergunte o número de telefone.\n";
-        
         $prompt .= "\nSERVIÇOS DISPONÍVEIS:\n";
         foreach ($servicos as $service) {
             $prompt .= "- {$service['nome']}: {$service['duracao_minutos']} minutos, R$ " . number_format($service['preco'], 2, ',', '.') . "\n";
@@ -373,16 +369,14 @@ class AIController {
         $prompt .= "INSTRUÇÕES:\n";
         $prompt .= "1. Responda de forma natural, amigável e profissional\n";
         $prompt .= "2. Use emojis quando apropriado para tornar a conversa mais calorosa\n";
-        $prompt .= "3. NUNCA pergunte o número de telefone do cliente - ele já é conhecido: {$context['telefone_cliente']}\n";
-        $prompt .= "4. Considere o contexto da conversa anterior para dar continuidade natural\n";
-        $prompt .= "5. Se o cliente quiser agendar, siga um fluxo estruturado: serviço → data → horário → nome\n";
-        $prompt .= "6. Se não tiver todas as informações para agendamento, pergunte uma coisa por vez\n";
-        $prompt .= "7. Seja prestativo e tente resolver a necessidade do cliente\n";
-        $prompt .= "8. Mantenha as respostas concisas mas informativas\n";
-        $prompt .= "9. Para agendamentos, sempre confirme os detalhes antes de finalizar\n";
-        $prompt .= "10. Se o cliente já foi saudado recentemente, evite repetir saudações completas e vá direto ao ponto ou faça uma pergunta de acompanhamento\n";
-        $prompt .= "11. Mantenha um tom natural e evite repetições desnecessárias\n";
-        $prompt .= "12. LEMBRE-SE: O telefone {$context['telefone_cliente']} já está sendo usado para esta conversa\n\n";
+        $prompt .= "3. Considere o contexto da conversa anterior para dar continuidade natural\n";
+        $prompt .= "4. Se o cliente quiser agendar, siga um fluxo estruturado: serviço → data → horário → nome\n";
+        $prompt .= "5. Se não tiver todas as informações para agendamento, pergunte uma coisa por vez\n";
+        $prompt .= "6. Seja prestativo e tente resolver a necessidade do cliente\n";
+        $prompt .= "7. Mantenha as respostas concisas mas informativas\n";
+        $prompt .= "8. Para agendamentos, sempre confirme os detalhes antes de finalizar\n";
+        $prompt .= "9. Se o cliente já foi saudado recentemente, evite repetir saudações completas e vá direto ao ponto ou faça uma pergunta de acompanhamento\n";
+        $prompt .= "10. Mantenha um tom natural e evite repetições desnecessárias\n\n";
         
         $prompt .= "Responda agora à mensagem do cliente:";
         
