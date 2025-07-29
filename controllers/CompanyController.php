@@ -207,6 +207,21 @@ class CompanyController {
         $company_id = $_SESSION['user_id'];
         
         try {
+            // Handle AJAX status check
+            if (isset($_GET['action']) && $_GET['action'] === 'check_status') {
+                header('Content-Type: application/json');
+                
+                $db = new Database();
+                $pdo = $db->getConnection();
+                
+                $stmt = $pdo->prepare("SELECT whatsapp_connected FROM companies WHERE id = ?");
+                $stmt->execute([$company_id]);
+                $company = $stmt->fetch();
+                
+                echo json_encode(['connected' => (bool)($company['whatsapp_connected'] ?? false)]);
+                exit;
+            }
+            
             $db = new Database();
             $pdo = $db->getConnection();
             
@@ -530,13 +545,23 @@ class CompanyController {
                 // Check for QR code in response
                 if (isset($qr_data['base64']) && !empty($qr_data['base64'])) {
                     error_log("QR code found in response");
-                    return ['success' => true, 'qr_code' => $qr_data['base64']];
+                    // Remove data:image/png;base64, prefix if present
+                    $qr_base64 = $qr_data['base64'];
+                    if (strpos($qr_base64, 'data:image/png;base64,') === 0) {
+                        $qr_base64 = substr($qr_base64, strlen('data:image/png;base64,'));
+                    }
+                    return ['success' => true, 'qr_code' => $qr_base64];
                 }
                 
                 // Check for QR code in nested structure
                 if (isset($qr_data['qrcode']['base64']) && !empty($qr_data['qrcode']['base64'])) {
                     error_log("QR code found in nested qrcode structure");
-                    return ['success' => true, 'qr_code' => $qr_data['qrcode']['base64']];
+                    // Remove data:image/png;base64, prefix if present
+                    $qr_base64 = $qr_data['qrcode']['base64'];
+                    if (strpos($qr_base64, 'data:image/png;base64,') === 0) {
+                        $qr_base64 = substr($qr_base64, strlen('data:image/png;base64,'));
+                    }
+                    return ['success' => true, 'qr_code' => $qr_base64];
                 }
                 
                 // Check for pairing code as alternative to QR code

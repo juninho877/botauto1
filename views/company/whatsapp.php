@@ -184,7 +184,12 @@ include BASE_PATH . '/views/layouts/header.php';
                         <div id="qrCodeContainer">
                             <?php if ($qr_code): ?>
                                 <img src="data:image/png;base64,<?= $qr_code ?>" alt="QR Code WhatsApp" class="img-fluid mb-3" style="max-width: 300px;">
-                                <p class="text-success">QR Code gerado com sucesso!</p>
+                                <div class="alert alert-success">
+                                    <i class="bi bi-check-circle me-2"></i>
+                                    <strong>QR Code gerado com sucesso!</strong>
+                                    <br>
+                                    <small>Este QR Code é válido por alguns minutos. Se expirar, clique em "Atualizar QR Code".</small>
+                                </div>
                             <?php else: ?>
                                 <div class="spinner-border text-primary mb-3" role="status">
                                     <span class="visually-hidden">Gerando QR Code...</span>
@@ -204,7 +209,7 @@ include BASE_PATH . '/views/layouts/header.php';
                         </div>
                         
                         <div class="mt-3">
-                            <button class="btn btn-outline-primary me-2" onclick="location.reload()">
+                            <button class="btn btn-outline-primary me-2" onclick="refreshQRCode()">
                                 <i class="bi bi-arrow-clockwise me-2"></i>
                                 Atualizar QR Code
                             </button>
@@ -248,7 +253,7 @@ include BASE_PATH . '/views/layouts/header.php';
                         </div>
                         
                         <div class="mt-3">
-                            <button class="btn btn-outline-primary me-2" onclick="location.reload()">
+                            <button class="btn btn-outline-primary me-2" onclick="refreshQRCode()">
                                 <i class="bi bi-arrow-clockwise me-2"></i>
                                 Gerar Novo Código
                             </button>
@@ -349,21 +354,72 @@ function checkConnectionStatus() {
         <p>Verificando status da conexão...</p>
     `;
     
-    // Simulate API call
-    setTimeout(() => {
-        // In production, this would be an actual AJAX call to check status
-        location.reload();
-    }, 2000);
+    // Make actual AJAX call to check connection status
+    fetch('/company/whatsapp?action=check_status', {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.connected) {
+            statusDiv.innerHTML = `
+                <i class="bi bi-whatsapp text-success display-1 mb-3"></i>
+                <h5>Status da Conexão</h5>
+                <span class="status-badge status-confirmado">Conectado</span>
+                <p class="text-muted mt-3">WhatsApp conectado com sucesso!</p>
+            `;
+            // Reload page after 2 seconds to update the interface
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            statusDiv.innerHTML = `
+                <i class="bi bi-whatsapp text-warning display-1 mb-3"></i>
+                <h5>Status da Conexão</h5>
+                <span class="status-badge status-agendado">Desconectado</span>
+                <p class="text-muted mt-3">Ainda não conectado. Continue tentando escanear o QR Code.</p>
+            `;
+        }
+    })
+    .catch(error => {
+        console.error('Erro ao verificar status:', error);
+        statusDiv.innerHTML = `
+            <i class="bi bi-whatsapp text-danger display-1 mb-3"></i>
+            <h5>Status da Conexão</h5>
+            <span class="status-badge status-cancelado">Erro</span>
+            <p class="text-muted mt-3">Erro ao verificar status da conexão.</p>
+        `;
+    });
 }
 
 // Auto-refresh QR code every 30 seconds if displayed
 <?php if (isset($qr_code) && !$whatsapp_connected): ?>
-setInterval(() => {
+// Auto-refresh QR code every 2 minutes (120 seconds) instead of 30 seconds
+let qrRefreshInterval = setInterval(() => {
     const qrSection = document.getElementById('qrCodeSection');
     if (qrSection && qrSection.style.display !== 'none') {
-        checkConnectionStatus();
+        console.log('Auto-refreshing QR code...');
+        location.reload();
+    } else {
+        // Clear interval if QR section is not visible
+        clearInterval(qrRefreshInterval);
     }
-}, 30000);
+}, 120000); // 2 minutes
+
+// Add manual refresh button functionality
+function refreshQRCode() {
+    const qrContainer = document.getElementById('qrCodeContainer');
+    qrContainer.innerHTML = `
+        <div class="spinner-border text-primary mb-3" role="status">
+            <span class="visually-hidden">Atualizando QR Code...</span>
+        </div>
+        <p>Atualizando QR Code...</p>
+    `;
+    
+    setTimeout(() => {
+        location.reload();
+    }, 1000);
+}
 <?php endif; ?>
 </script>
 
