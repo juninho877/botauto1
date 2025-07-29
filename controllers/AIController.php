@@ -13,53 +13,6 @@ class AIController {
     }
     
     public function analyzeIntent($message, $context) {
-        // Análise básica de intenção usando regex
-        $message_lower = strtolower($message);
-        $intent = [];
-        
-        // Detectar intenção de agendamento
-        if (preg_match('/\b(agendar|marcar|quero|preciso|gostaria).*\b(horário|horario|consulta|serviço|servico)\b/', $message_lower)) {
-            $intent['action'] = 'schedule';
-            
-            // Extrair serviço mencionado
-            foreach ($context['servicos'] as $service) {
-                $service_name = strtolower($service['nome']);
-                if (strpos($message_lower, $service_name) !== false) {
-                    $intent['service_id'] = $service['id'];
-                    $intent['service_name'] = $service['nome'];
-                    break;
-                }
-            }
-            
-            // Extrair data
-            $intent['date'] = $this->extractDate($message);
-            
-            // Extrair horário
-            $intent['time'] = $this->extractTime($message);
-        }
-        
-        // Detectar intenção de cancelamento
-        if (preg_match('/\b(cancelar|desmarcar|remover)\b/', $message_lower)) {
-            $intent['action'] = 'cancel';
-        }
-        
-        // Detectar consulta de disponibilidade
-        if (preg_match('/\b(disponível|disponivel|tem vaga|tem horário|tem horario)\b/', $message_lower)) {
-            $intent['action'] = 'check_availability';
-            $intent['date'] = $this->extractDate($message);
-            $intent['time'] = $this->extractTime($message);
-        }
-        
-        // Detectar solicitação de informações
-        if (preg_match('/\b(preço|preco|quanto custa|valor|serviços|servicos)\b/', $message_lower)) {
-            $intent['action'] = 'info';
-            $intent['type'] = 'services';
-        }
-        
-        return $intent;
-    }
-    
-    public function buildPrompt($message, $context) {
     public function processScheduleRequest($message, $context, $phone, $flow_data = []) {
         try {
             error_log("WHATSAPP AI FLOW: Processando passo - " . json_encode($flow_data));
