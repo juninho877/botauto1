@@ -152,7 +152,7 @@ class WhatsAppController {
                 'servicos' => $services,
                 'agendamentos_recentes' => $recent_appointments,
                 'horario_funcionamento' => json_decode($company['horario_funcionamento'], true),
-                'telefone_cliente' => $phone
+                'telefone_cliente' => $phone,
                 'conversa_anterior' => $conversationContext
             ];
             
