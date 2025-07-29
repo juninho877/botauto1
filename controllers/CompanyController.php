@@ -242,6 +242,17 @@ class CompanyController {
             $qr_code = null;
             $pairing_code = null;
             
+            // Check for QR code or pairing code data from session (after redirect)
+            if (isset($_SESSION['qr_code_data'])) {
+                $qr_code = $_SESSION['qr_code_data'];
+                unset($_SESSION['qr_code_data']);
+            }
+            
+            if (isset($_SESSION['pairing_code_data'])) {
+                $pairing_code = $_SESSION['pairing_code_data'];
+                unset($_SESSION['pairing_code_data']);
+            }
+            
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!verifyCSRFToken($_POST['csrf_token'])) {
                     $_SESSION['error'] = 'Token CSRF inválido';
@@ -269,16 +280,15 @@ class CompanyController {
                     
                     if ($result['success']) {
                         if (isset($result['qr_code'])) {
-                            $qr_code = $result['qr_code'];
+                            $_SESSION['qr_code_data'] = $result['qr_code'];
                             $_SESSION['success'] = 'QR Code gerado! Escaneie com seu WhatsApp.';
                         } elseif (isset($result['pairing_code'])) {
-                            $pairing_code = $result['pairing_code'];
+                            $_SESSION['pairing_code_data'] = $result['pairing_code'];
                             $_SESSION['success'] = 'Código de pareamento gerado! Use o código: ' . $result['pairing_code'];
                         } else {
                             $_SESSION['success'] = 'Instância conectada com sucesso!';
                             $stmt = $pdo->prepare("UPDATE companies SET whatsapp_connected = 1 WHERE id = ?");
                             $stmt->execute([$company_id]);
-                            $whatsapp_connected = true;
                         }
                         auditLog('whatsapp_connect_success', "WhatsApp conectado - Instância: $instance_name", $company_id, $_SESSION['user_id']);
                     } else {
