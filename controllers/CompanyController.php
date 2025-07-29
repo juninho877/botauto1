@@ -401,6 +401,7 @@ class CompanyController {
                             'Content-Type' => 'application/json'
                         ],
                         'events' => [
+                            'QRCODE_UPDATED',
                             'MESSAGES_UPSERT',
                             'MESSAGES_UPDATE',
                             'MESSAGES_DELETE',
