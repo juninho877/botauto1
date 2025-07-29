@@ -206,21 +206,54 @@ class CompanyController {
     public function whatsapp() {
         $company_id = $_SESSION['user_id'];
         
-        try {
-            $db = new Database();
-            $pdo = $db->getConnection();
+        // Handle AJAX status check
+        if (isset($_GET['action']) && $_GET['action'] === 'check_status') {
+            header('Content-Type: application/json');
             
-            // Handle AJAX status check
-            if (isset($_GET['action']) && $_GET['action'] === 'check_status') {
-                header('Content-Type: application/json');
+            try {
+                $db = new Database();
+                $pdo = $db->getConnection();
                 
-                $stmt = $pdo->prepare("SELECT whatsapp_connected FROM companies WHERE id = ?");
+                // Get company data
+                $stmt = $pdo->prepare("SELECT whatsapp_connected, whatsapp_instance FROM companies WHERE id = ?");
                 $stmt->execute([$company_id]);
                 $company = $stmt->fetch();
                 
-                echo json_encode(['connected' => (bool)($company['whatsapp_connected'] ?? false)]);
-                exit;
+                if (!$company) {
+                    echo json_encode(['connected' => false, 'error' => 'Company not found']);
+                    exit;
+                }
+                
+                // Check real connection status with Evolution API
+                $stmt = $pdo->query("SELECT * FROM admin_config WHERE id = 1");
+                $config = $stmt->fetch();
+                
+                if ($config && $company['whatsapp_instance']) {
+                    $realStatus = $this->checkWhatsAppConnectionState($config, $company['whatsapp_instance']);
+                    
+                    // Update database if status changed
+                    if ($realStatus !== (bool)$company['whatsapp_connected']) {
+                        $stmt = $pdo->prepare("UPDATE companies SET whatsapp_connected = ? WHERE id = ?");
+                        $stmt->execute([$realStatus ? 1 : 0, $company_id]);
+                        
+                        auditLog('whatsapp_status_sync', "Status WhatsApp sincronizado: " . ($realStatus ? 'conectado' : 'desconectado'), $company_id);
+                    }
+                    
+                    echo json_encode(['connected' => $realStatus]);
+                } else {
+                    echo json_encode(['connected' => (bool)$company['whatsapp_connected']]);
+                }
+                
+            } catch (Exception $e) {
+                error_log("Erro ao verificar status WhatsApp: " . $e->getMessage());
+                echo json_encode(['connected' => false, 'error' => 'Internal error']);
             }
+            exit;
+        }
+        
+        try {
+            $db = new Database();
+            $pdo = $db->getConnection();
             
             // Get company data
             $stmt = $pdo->prepare("SELECT * FROM companies WHERE id = ?");
@@ -244,8 +277,7 @@ class CompanyController {
             }
             
             // Generate instance name based on company
-            $instance_name = 'company_' . $company_id . '_' . preg_replace('/[^a-zA-Z0-9]/', '', strtolower($company['nome']));
-            $instance_name = substr($instance_name, 0, 50); // Limit length
+            $instance_name = 'company_' . $company_id;
             
             // Variables to pass to view
             $whatsapp_connected = $company['whatsapp_connected'];
@@ -283,7 +315,7 @@ class CompanyController {
                         exit;
                     }
                     
-                    // Update company phone
+                    // Update company phone and instance name
                     $stmt = $pdo->prepare("UPDATE companies SET telefone = ?, whatsapp_instance = ? WHERE id = ?");
                     $stmt->execute([$phone, $instance_name, $company_id]);
                     
@@ -297,10 +329,15 @@ class CompanyController {
                         } elseif (isset($result['pairing_code'])) {
                             $_SESSION['pairing_code_data'] = $result['pairing_code'];
                             $_SESSION['success'] = 'Código de pareamento gerado! Use o código: ' . $result['pairing_code'];
+                        } elseif (isset($result['already_connected']) && $result['already_connected']) {
+                            // Update database immediately if already connected
+                            $stmt = $pdo->prepare("UPDATE companies SET whatsapp_connected = 1 WHERE id = ?");
+                            $stmt->execute([$company_id]);
+                            $_SESSION['success'] = 'WhatsApp já está conectado!';
                         } else {
-                            $_SESSION['success'] = 'Instância conectada com sucesso!';
+                            $_SESSION['success'] = 'Instância criada com sucesso! Aguarde a conexão.';
                         }
-                        auditLog('whatsapp_connect_success', "WhatsApp conectado - Instância: $instance_name", $company_id, $_SESSION['user_id']);
+                        auditLog('whatsapp_connect_attempt', "Tentativa de conexão WhatsApp - Instância: $instance_name", $company_id, $_SESSION['user_id']);
                     } else {
                         $_SESSION['error'] = 'Erro ao conectar: ' . $result['message'];
                         auditLog('whatsapp_connect_error', "Erro ao conectar WhatsApp: " . $result['message'], $company_id, $_SESSION['user_id']);
@@ -352,50 +389,33 @@ class CompanyController {
             $api_url = rtrim($config['api_whatsapp_url'], '/');
             $api_token = $config['api_whatsapp_token'];
             
-            error_log("Checking connection state for instance: $instance_name");
-            
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, "$api_url/instance/connectionState/$instance_name");
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
                 'apikey: ' . $api_token
             ]);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
             
             $response = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $curlError = curl_error($ch);
             curl_close($ch);
-            
-            error_log("Connection state check - HTTP: $httpCode, Response: $response, cURL Error: $curlError");
-            
-            if ($curlError) {
-                error_log("cURL error checking connection state: $curlError");
-                return false;
-            }
             
             if ($httpCode === 200) {
                 $data = json_decode($response, true);
                 
                 if (is_array($data) && isset($data['instance']['state'])) {
                     $state = $data['instance']['state'];
-                    error_log("Instance state: $state");
-                    
-                    // Return true only if state is 'open' (connected)
                     return $state === 'open';
-                } else {
-                    error_log("Invalid response structure for connection state");
-                    return false;
                 }
-            } else {
-                error_log("HTTP error checking connection state: $httpCode - $response");
-                return false;
             }
             
+            return false;
+            
         } catch (Exception $e) {
-            error_log("Exception checking WhatsApp connection state: " . $e->getMessage());
+            error_log("Erro ao verificar estado da conexão WhatsApp: " . $e->getMessage());
             return false;
         }
     }
@@ -405,13 +425,11 @@ class CompanyController {
             $api_url = rtrim($config['api_whatsapp_url'], '/');
             $api_token = $config['api_whatsapp_token'];
             
-            // Step 1: Check if instance exists
-            error_log("Step 1: Checking if instance '$instance_name' exists...");
+            // Step 1: Check if instance exists and its state
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, "$api_url/instance/fetchInstances");
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Content-Type: application/json',
                 'apikey: ' . $api_token
             ]);
             curl_setopt($ch, CURLOPT_TIMEOUT, 30);
@@ -420,42 +438,33 @@ class CompanyController {
             
             $response = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $curlError = curl_error($ch);
             curl_close($ch);
             
-            error_log("Evolution API fetchInstances - HTTP: $httpCode, Response: $response, cURL Error: $curlError");
-            
             if ($httpCode !== 200) {
-                return ['success' => false, 'message' => "Erro ao conectar com a API Evolution (HTTP $httpCode): $response"];
-            }
-            
-            if ($curlError) {
-                return ['success' => false, 'message' => "Erro cURL: $curlError"];
+                return ['success' => false, 'message' => "Erro ao conectar com a API Evolution (HTTP $httpCode)"];
             }
             
             $instances = json_decode($response, true);
-            
-            if ($instances === null) {
-                return ['success' => false, 'message' => "Resposta inválida da API Evolution: $response"];
-            }
-            
             $instance_exists = false;
-            $current_instance_state = null;
+            $current_state = null;
             
             if (is_array($instances)) {
                 foreach ($instances as $instance) {
                     if (isset($instance['instance']['instanceName']) && $instance['instance']['instanceName'] === $instance_name) {
                         $instance_exists = true;
-                        $current_instance_state = $instance['instance']['state'] ?? 'unknown';
-                        error_log("Found existing instance '$instance_name' with state: $current_instance_state");
+                        $current_state = $instance['instance']['state'] ?? 'unknown';
                         break;
                     }
                 }
             }
             
+            // If instance exists and is already connected
+            if ($instance_exists && $current_state === 'open') {
+                return ['success' => true, 'already_connected' => true, 'message' => 'WhatsApp já está conectado'];
+            }
+            
             // Step 2: Create instance if it doesn't exist
             if (!$instance_exists) {
-                error_log("Step 2: Creating new instance '$instance_name'...");
                 $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
                 $webhook_url = $protocol . '://' . $_SERVER['HTTP_HOST'] . '/webhook/whatsapp.php';
                 
@@ -464,44 +473,17 @@ class CompanyController {
                     'number' => $phone,
                     'integration' => 'WHATSAPP-BAILEYS',
                     'qrcode' => true,
-                    'rejectCall' => true,
-                    'msgCall' => 'Chamadas não são aceitas neste número.',
-                    'groupsIgnore' => false,
-                    'alwaysOnline' => true,
-                    'readMessages' => true,
-                    'readStatus' => true,
-                    'syncFullHistory' => false,
                     'webhook' => [
                         'url' => $webhook_url,
                         'byEvents' => true,
                         'base64' => true,
-                        'headers' => [
-                            'Content-Type' => 'application/json'
-                        ],
                         'events' => [
                             'QRCODE_UPDATED',
-                            'MESSAGES_UPSERT',
-                            'MESSAGES_UPDATE',
-                            'MESSAGES_DELETE',
-                            'SEND_MESSAGE',
-                            'CONTACTS_UPDATE',
-                            'CONTACTS_UPSERT',
-                            'PRESENCE_UPDATE',
-                            'CHATS_UPDATE',
-                            'CHATS_UPSERT',
-                            'CHATS_DELETE',
-                            'GROUPS_UPSERT',
-                            'GROUP_UPDATE',
-                            'GROUP_PARTICIPANTS_UPDATE',
                             'CONNECTION_UPDATE',
-                            'LABELS_EDIT',
-                            'LABELS_ASSOCIATION',
-                            'CALL'
+                            'MESSAGES_UPSERT'
                         ]
                     ]
                 ];
-                
-                error_log("Creating instance with data: " . json_encode($create_data));
                 
                 $ch = curl_init();
                 curl_setopt($ch, CURLOPT_URL, "$api_url/instance/create");
@@ -518,10 +500,7 @@ class CompanyController {
                 
                 $response = curl_exec($ch);
                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                $curlError = curl_error($ch);
                 curl_close($ch);
-                
-                error_log("Evolution API create instance - HTTP: $httpCode, Response: $response, cURL Error: $curlError");
                 
                 if ($httpCode !== 201 && $httpCode !== 200) {
                     $error_data = json_decode($response, true);
@@ -529,38 +508,20 @@ class CompanyController {
                     
                     if (is_array($error_data) && isset($error_data['message'])) {
                         $error_message = $error_data['message'];
-                    } elseif (is_array($error_data) && isset($error_data['error'])) {
-                        $error_message = $error_data['error'];
-                    } else {
-                        $error_message .= " (HTTP $httpCode): $response";
                     }
                     
                     return ['success' => false, 'message' => $error_message];
                 }
                 
-                if ($curlError) {
-                    return ['success' => false, 'message' => "Erro cURL ao criar instância: $curlError"];
-                }
-                
-                // Wait a moment for instance to initialize
-                sleep(2);
-            } else {
-                error_log("Step 2: Instance '$instance_name' already exists with state: $current_instance_state");
-                
-                // If instance is already open/connected, no need for QR code
-                if ($current_instance_state === 'open') {
-                    error_log("Instance is already connected (state: open)");
-                    return ['success' => true, 'message' => 'WhatsApp já está conectado'];
-                }
+                // Wait for instance to initialize
+                sleep(3);
             }
             
-            // Step 3: Get connection status and QR Code if needed
-            error_log("Step 3: Getting connection status for instance '$instance_name'...");
+            // Step 3: Connect to get QR code
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, "$api_url/instance/connect/$instance_name");
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Content-Type: application/json',
                 'apikey: ' . $api_token
             ]);
             curl_setopt($ch, CURLOPT_TIMEOUT, 30);
@@ -569,173 +530,7 @@ class CompanyController {
             
             $response = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $curlError = curl_error($ch);
             curl_close($ch);
-            
-            error_log("Evolution API connect instance - HTTP: $httpCode, Response: $response, cURL Error: $curlError");
-            
-            if ($curlError) {
-                return ['success' => false, 'message' => "Erro cURL ao conectar instância: $curlError"];
-            }
-            
-            if ($httpCode === 200) {
-                $qr_data = json_decode($response, true);
-                
-                if (!is_array($qr_data)) {
-                    $json_error = json_last_error_msg();
-                    $truncated_response = strlen($response) > 200 ? substr($response, 0, 200) . '...' : $response;
-                    error_log("Invalid JSON response from connect endpoint. JSON Error: $json_error. Response: $response");
-                    return ['success' => false, 'message' => "Resposta inválida da API Evolution (JSON Error: $json_error): $truncated_response"];
-                }
-                
-                error_log("Connect response structure: " . json_encode($qr_data, JSON_PRETTY_PRINT));
-                
-                // Check for QR code in response
-                if (isset($qr_data['base64']) && !empty($qr_data['base64'])) {
-                    error_log("QR code found in response");
-                    // Remove data:image/png;base64, prefix if present
-                    $qr_base64 = $qr_data['base64'];
-                    if (strpos($qr_base64, 'data:image/png;base64,') === 0) {
-                        $qr_base64 = substr($qr_base64, strlen('data:image/png;base64,'));
-                    }
-                    return ['success' => true, 'qr_code' => $qr_base64];
-                }
-                
-                // Check for QR code in nested structure
-                if (isset($qr_data['qrcode']['base64']) && !empty($qr_data['qrcode']['base64'])) {
-                    error_log("QR code found in nested qrcode structure");
-                    // Remove data:image/png;base64, prefix if present
-                    $qr_base64 = $qr_data['qrcode']['base64'];
-                    if (strpos($qr_base64, 'data:image/png;base64,') === 0) {
-                        $qr_base64 = substr($qr_base64, strlen('data:image/png;base64,'));
-                    }
-                    return ['success' => true, 'qr_code' => $qr_base64];
-                }
-                
-                // Check for pairing code as alternative to QR code
-                if (isset($qr_data['pairingCode']) && !empty($qr_data['pairingCode'])) {
-                    error_log("Pairing code found in response: " . $qr_data['pairingCode']);
-                    return [
-                        'success' => true, 
-                        'pairing_code' => $qr_data['pairingCode'],
-                        'message' => 'Use o código de pareamento: ' . $qr_data['pairingCode'] . '. Abra o WhatsApp > Dispositivos conectados > Conectar com código de telefone.'
-                    ];
-                }
-                
-                // Check instance state
-                $instance_state = null;
-                if (isset($qr_data['instance']['state'])) {
-                    $instance_state = $qr_data['instance']['state'];
-                } elseif (isset($qr_data['state'])) {
-                    $instance_state = $qr_data['state'];
-                }
-                
-                if ($instance_state) {
-                    error_log("Instance state: $instance_state");
-                    
-                    switch ($instance_state) {
-                        case 'open':
-                            return ['success' => true, 'message' => 'WhatsApp já está conectado'];
-                            
-                        case 'connecting':
-                        case 'qrReadSuccess':
-                            return ['success' => true, 'message' => 'WhatsApp está conectando... Aguarde alguns segundos e tente novamente.'];
-                            
-                        case 'close':
-                        case 'closed':
-                        case 'disconnected':
-                            // Try to restart the connection
-                            error_log("Instance is closed/disconnected, attempting to restart connection...");
-                            return $this->restartWhatsAppConnection($config, $instance_name);
-                            
-                        case 'browserClose':
-                            return ['success' => false, 'message' => 'WhatsApp Web foi fechado. Tente conectar novamente.'];
-                            
-                        case 'qrReadFail':
-                            return ['success' => false, 'message' => 'Falha ao ler QR Code. Tente conectar novamente.'];
-                            
-                        case 'websocketError':
-                            return ['success' => false, 'message' => 'Erro de conexão WebSocket. Verifique sua conexão e tente novamente.'];
-                            
-                        default:
-                            error_log("Unknown instance state: $instance_state");
-                            return ['success' => false, 'message' => "Estado da instância desconhecido: $instance_state. Tente novamente."];
-                    }
-                } else {
-                    error_log("No instance state found in response");
-                    
-                    // If no state but we have a response, try to extract any useful info
-                    if (isset($qr_data['message'])) {
-                        return ['success' => false, 'message' => "API Evolution: " . $qr_data['message']];
-                    }
-                    
-                    return ['success' => false, 'message' => "Não foi possível determinar o estado da instância. Resposta: " . json_encode($qr_data)];
-                }
-            } else {
-                $error_data = json_decode($response, true);
-                $error_message = "Erro ao conectar instância (HTTP $httpCode)";
-                
-                if (is_array($error_data) && isset($error_data['message'])) {
-                    $error_message .= ": " . $error_data['message'];
-                } else {
-                    $error_message .= ": $response";
-                }
-                
-                return ['success' => false, 'message' => $error_message];
-            }
-            
-        } catch (Exception $e) {
-            error_log("Erro ao conectar WhatsApp: " . $e->getMessage());
-            return ['success' => false, 'message' => 'Erro interno ao conectar'];
-        }
-    }
-    
-    private function restartWhatsAppConnection($config, $instance_name) {
-        try {
-            $api_url = rtrim($config['api_whatsapp_url'], '/');
-            $api_token = $config['api_whatsapp_token'];
-            
-            error_log("Attempting to restart connection for instance: $instance_name");
-            
-            // First, try to restart the instance
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, "$api_url/instance/restart/$instance_name");
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Content-Type: application/json',
-                'Authorization: Bearer ' . $api_token
-            ]);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-            
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            
-            error_log("Restart instance response - HTTP: $httpCode, Response: $response");
-            
-            // Wait for restart to complete
-            sleep(3);
-            
-            // Now try to connect again
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, "$api_url/instance/connect/$instance_name");
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Content-Type: application/json',
-                'Authorization: Bearer ' . $api_token
-            ]);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-            
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            
-            error_log("Reconnect after restart - HTTP: $httpCode, Response: $response");
             
             if ($httpCode === 200) {
                 $connect_data = json_decode($response, true);
@@ -743,20 +538,40 @@ class CompanyController {
                 if (is_array($connect_data)) {
                     // Check for QR code
                     if (isset($connect_data['base64']) && !empty($connect_data['base64'])) {
-                        return ['success' => true, 'qr_code' => $connect_data['base64']];
+                        $qr_base64 = $connect_data['base64'];
+                        if (strpos($qr_base64, 'data:image/png;base64,') === 0) {
+                            $qr_base64 = substr($qr_base64, strlen('data:image/png;base64,'));
+                        }
+                        return ['success' => true, 'qr_code' => $qr_base64];
                     }
                     
                     if (isset($connect_data['qrcode']['base64']) && !empty($connect_data['qrcode']['base64'])) {
-                        return ['success' => true, 'qr_code' => $connect_data['qrcode']['base64']];
+                        $qr_base64 = $connect_data['qrcode']['base64'];
+                        if (strpos($qr_base64, 'data:image/png;base64,') === 0) {
+                            $qr_base64 = substr($qr_base64, strlen('data:image/png;base64,'));
+                        }
+                        return ['success' => true, 'qr_code' => $qr_base64];
+                    }
+                    
+                    // Check for pairing code
+                    if (isset($connect_data['pairingCode']) && !empty($connect_data['pairingCode'])) {
+                        return ['success' => true, 'pairing_code' => $connect_data['pairingCode']];
+                    }
+                    
+                    // Check instance state
+                    $state = $connect_data['instance']['state'] ?? $connect_data['state'] ?? null;
+                    
+                    if ($state === 'open') {
+                        return ['success' => true, 'already_connected' => true, 'message' => 'WhatsApp já está conectado'];
                     }
                 }
             }
             
-            return ['success' => false, 'message' => 'Instância reiniciada, mas não foi possível gerar QR Code. Tente novamente em alguns segundos.'];
+            return ['success' => false, 'message' => 'Não foi possível gerar QR Code. Tente novamente.'];
             
         } catch (Exception $e) {
-            error_log("Erro ao reiniciar conexão WhatsApp: " . $e->getMessage());
-            return ['success' => false, 'message' => 'Erro ao reiniciar conexão'];
+            error_log("Erro ao conectar WhatsApp: " . $e->getMessage());
+            return ['success' => false, 'message' => 'Erro interno ao conectar'];
         }
     }
     
@@ -771,7 +586,6 @@ class CompanyController {
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Content-Type: application/json',
                 'apikey: ' . $api_token
             ]);
             curl_setopt($ch, CURLOPT_TIMEOUT, 30);
@@ -780,14 +594,7 @@ class CompanyController {
             
             $response = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $curlError = curl_error($ch);
             curl_close($ch);
-            
-            error_log("Evolution API disconnect - HTTP: $httpCode, Response: $response, cURL Error: $curlError");
-            
-            if ($curlError) {
-                return ['success' => false, 'message' => "Erro cURL ao desconectar: $curlError"];
-            }
             
             if ($httpCode === 200) {
                 return ['success' => true, 'message' => 'Desconectado com sucesso'];
