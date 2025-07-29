@@ -240,6 +240,7 @@ class CompanyController {
             $company_phone = $company['telefone'];
             $ai_preference = $company['ia_preferida'];
             $qr_code = null;
+            $pairing_code = null;
             
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!verifyCSRFToken($_POST['csrf_token'])) {
@@ -270,6 +271,9 @@ class CompanyController {
                         if (isset($result['qr_code'])) {
                             $qr_code = $result['qr_code'];
                             $_SESSION['success'] = 'QR Code gerado! Escaneie com seu WhatsApp.';
+                        } elseif (isset($result['pairing_code'])) {
+                            $pairing_code = $result['pairing_code'];
+                            $_SESSION['success'] = 'Código de pareamento gerado! Use o código: ' . $result['pairing_code'];
                         } else {
                             $_SESSION['success'] = 'Instância conectada com sucesso!';
                             $stmt = $pdo->prepare("UPDATE companies SET whatsapp_connected = 1 WHERE id = ?");
@@ -317,6 +321,7 @@ class CompanyController {
             $ai_preference = 'padrao';
             $instance_name = '';
             $qr_code = null;
+            $pairing_code = null;
         }
         
         include BASE_PATH . '/views/company/whatsapp.php';
@@ -504,8 +509,10 @@ class CompanyController {
                 $qr_data = json_decode($response, true);
                 
                 if (!is_array($connect_data)) {
-                    error_log("Invalid JSON response from connect endpoint: $response");
-                    return ['success' => false, 'message' => "Resposta inválida da API Evolution: $response"];
+                    $json_error = json_last_error_msg();
+                    $truncated_response = strlen($response) > 200 ? substr($response, 0, 200) . '...' : $response;
+                    error_log("Invalid JSON response from connect endpoint. JSON Error: $json_error. Response: $response");
+                    return ['success' => false, 'message' => "Resposta inválida da API Evolution (JSON Error: $json_error): $truncated_response"];
                 }
                 
                 error_log("Connect response structure: " . json_encode($connect_data, JSON_PRETTY_PRINT));
@@ -520,6 +527,16 @@ class CompanyController {
                 if (isset($connect_data['qrcode']['base64']) && !empty($connect_data['qrcode']['base64'])) {
                     error_log("QR code found in nested qrcode structure");
                     return ['success' => true, 'qr_code' => $connect_data['qrcode']['base64']];
+                }
+                
+                // Check for pairing code as alternative to QR code
+                if (isset($connect_data['pairingCode']) && !empty($connect_data['pairingCode'])) {
+                    error_log("Pairing code found in response: " . $connect_data['pairingCode']);
+                    return [
+                        'success' => true, 
+                        'pairing_code' => $connect_data['pairingCode'],
+                        'message' => 'Use o código de pareamento: ' . $connect_data['pairingCode'] . '. Abra o WhatsApp > Dispositivos conectados > Conectar com código de telefone.'
+                    ];
                 }
                 
                 // Check instance state

@@ -217,6 +217,49 @@ include BASE_PATH . '/views/layouts/header.php';
                 </div>
                 <?php endif; ?>
 
+                <!-- Pairing Code Section -->
+                <?php if (isset($pairing_code)): ?>
+                <div class="card mb-4" id="pairingCodeSection">
+                    <div class="card-header">
+                        <h6 class="m-0 font-weight-bold text-info">
+                            <i class="bi bi-phone me-2"></i>
+                            Código de Pareamento
+                        </h6>
+                    </div>
+                    <div class="card-body text-center">
+                        <div class="alert alert-info mb-4">
+                            <i class="bi bi-info-circle me-2"></i>
+                            <strong>Código de Pareamento Gerado!</strong>
+                        </div>
+                        
+                        <div class="bg-light p-4 rounded mb-4">
+                            <h2 class="display-4 font-monospace text-primary mb-0"><?= htmlspecialchars($pairing_code) ?></h2>
+                        </div>
+                        
+                        <div class="alert alert-warning">
+                            <i class="bi bi-exclamation-triangle me-2"></i>
+                            <strong>Instruções para Pareamento:</strong>
+                            <ol class="mb-0 mt-2 text-start">
+                                <li>Abra o WhatsApp no seu celular</li>
+                                <li>Toque em "Mais opções" (três pontos) > "Dispositivos conectados"</li>
+                                <li>Toque em "Conectar com código de telefone"</li>
+                                <li>Digite o código: <strong><?= htmlspecialchars($pairing_code) ?></strong></li>
+                            </ol>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <button class="btn btn-outline-primary me-2" onclick="location.reload()">
+                                <i class="bi bi-arrow-clockwise me-2"></i>
+                                Gerar Novo Código
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="checkConnectionStatus()">
+                                <i class="bi bi-check-circle me-2"></i>
+                                Verificar Conexão
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
                 <!-- Disconnect Section -->
                 <?php if (isset($whatsapp_connected) && $whatsapp_connected): ?>
                 <div class="card mb-4">
