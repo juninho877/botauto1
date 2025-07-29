@@ -1,9 +1,9 @@
 <?php
 class Database {
     private $host = 'localhost';
-    private $dbname = 'admin_botauto';
-    private $username = 'admin_botauto';
-    private $password = '4#luPi23zlOF~rgc';
+    private $dbname = 'whatsapp_saas';
+    private $username = 'root';
+    private $password = '';
     private $pdo;
     
     public function getConnection() {
