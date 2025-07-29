@@ -13,6 +13,42 @@ class AIController {
     }
     
     public function analyzeIntent($message, $context) {
+        $message_lower = strtolower($message);
+        
+        // Detectar intenção de agendamento
+        if (preg_match('/\b(agendar|marcar|horário|horario|agendamento|quero agendar|gostaria de agendar)\b/', $message_lower)) {
+            return ['action' => 'schedule'];
+        }
+        
+        // Detectar intenção de cancelamento
+        if (preg_match('/\b(cancelar|desmarcar|cancelamento)\b/', $message_lower)) {
+            return ['action' => 'cancel'];
+        }
+        
+        // Detectar verificação de disponibilidade
+        if (preg_match('/\b(disponibilidade|tem horário|horários disponíveis|disponível|livre)\b/', $message_lower)) {
+            return ['action' => 'check_availability'];
+        }
+        
+        // Detectar solicitação de informações sobre serviços
+        if (preg_match('/\b(serviços|servicos|preços|precos|tabela|valores|quanto custa|preço)\b/', $message_lower)) {
+            return ['action' => 'info', 'type' => 'services'];
+        }
+        
+        // Detectar horário de funcionamento
+        if (preg_match('/\b(horário|horario|funcionamento|aberto|fecha|abre|que horas)\b/', $message_lower)) {
+            return ['action' => 'info', 'type' => 'hours'];
+        }
+        
+        // Detectar contato/localização
+        if (preg_match('/\b(endereço|endereco|localização|localizacao|onde|telefone|contato)\b/', $message_lower)) {
+            return ['action' => 'info', 'type' => 'contact'];
+        }
+        
+        // Nenhuma intenção específica detectada
+        return ['action' => 'none'];
+    }
+    
     public function processScheduleRequest($message, $context, $phone, $flow_data = []) {
         try {
             error_log("WHATSAPP AI FLOW: Processando passo - " . json_encode($flow_data));
