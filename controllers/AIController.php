@@ -364,19 +364,24 @@ class AIController {
             }
         }
         
+        $prompt .= "\nINFORMAÇÕES DO CLIENTE ATUAL:\n";
+        $prompt .= "- Telefone: {$context['telefone_cliente']} (JÁ CONHECIDO - NÃO PERGUNTAR NOVAMENTE)\n";
+        $prompt .= "- O cliente está conversando pelo WhatsApp, então o telefone já está identificado\n";
+        
         $prompt .= "\nMENSAGEM DO CLIENTE: \"$message\"\n\n";
         
         $prompt .= "INSTRUÇÕES:\n";
         $prompt .= "1. Responda de forma natural, amigável e profissional\n";
         $prompt .= "2. Use emojis quando apropriado para tornar a conversa mais calorosa\n";
         $prompt .= "3. Considere o contexto da conversa anterior para dar continuidade natural\n";
-        $prompt .= "4. Se o cliente quiser agendar, siga um fluxo estruturado: serviço → data → horário → nome\n";
-        $prompt .= "5. Se não tiver todas as informações para agendamento, pergunte uma coisa por vez\n";
-        $prompt .= "6. Seja prestativo e tente resolver a necessidade do cliente\n";
-        $prompt .= "7. Mantenha as respostas concisas mas informativas\n";
-        $prompt .= "8. Para agendamentos, sempre confirme os detalhes antes de finalizar\n";
-        $prompt .= "9. Se o cliente já foi saudado recentemente, evite repetir saudações completas e vá direto ao ponto ou faça uma pergunta de acompanhamento\n";
-        $prompt .= "10. Mantenha um tom natural e evite repetições desnecessárias\n\n";
+        $prompt .= "4. IMPORTANTE: NUNCA pergunte o telefone do cliente - ele já está conversando pelo WhatsApp\n";
+        $prompt .= "5. Se o cliente quiser agendar, siga um fluxo estruturado: serviço → data → horário → nome\n";
+        $prompt .= "6. Se não tiver todas as informações para agendamento, pergunte uma coisa por vez (EXCETO telefone)\n";
+        $prompt .= "7. Seja prestativo e tente resolver a necessidade do cliente\n";
+        $prompt .= "8. Mantenha as respostas concisas mas informativas\n";
+        $prompt .= "9. Para agendamentos, sempre confirme os detalhes antes de finalizar\n";
+        $prompt .= "10. Se o cliente já foi saudado recentemente, evite repetir saudações completas e vá direto ao ponto ou faça uma pergunta de acompanhamento\n";
+        $prompt .= "11. Mantenha um tom natural e evite repetições desnecessárias\n\n";
         
         $prompt .= "Responda agora à mensagem do cliente:";
         
