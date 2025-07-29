@@ -3,6 +3,7 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../models/Company.php';
 require_once __DIR__ . '/../models/Service.php';
 require_once __DIR__ . '/../models/Appointment.php';
+
 class CompanyController {
     private $companyModel;
     private $serviceModel;
