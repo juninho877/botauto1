@@ -327,30 +327,45 @@ class CompanyController {
             $api_url = rtrim($config['api_whatsapp_url'], '/');
             $api_token = $config['api_whatsapp_token'];
             
-            // Check if instance exists
+            // Check if instance exists - fetchInstances endpoint
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, "$api_url/instance/fetchInstances");
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
                 'Content-Type: application/json',
-                'apikey: ' . $api_token
+                'Authorization: Bearer ' . $api_token
             ]);
             curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
             
             $response = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
             curl_close($ch);
             
+            // Log the response for debugging
+            error_log("Evolution API fetchInstances - HTTP: $httpCode, Response: $response, cURL Error: $curlError");
+            
             if ($httpCode !== 200) {
-                return ['success' => false, 'message' => 'Erro ao conectar com a API Evolution'];
+                return ['success' => false, 'message' => "Erro ao conectar com a API Evolution (HTTP $httpCode): $response"];
+            }
+            
+            if ($curlError) {
+                return ['success' => false, 'message' => "Erro cURL: $curlError"];
             }
             
             $instances = json_decode($response, true);
+            
+            if ($instances === null) {
+                return ['success' => false, 'message' => "Resposta inválida da API Evolution: $response"];
+            }
+            
             $instance_exists = false;
             
             if (is_array($instances)) {
                 foreach ($instances as $instance) {
-                    if ($instance['instance']['instanceName'] === $instance_name) {
+                    if (isset($instance['instance']['instanceName']) && $instance['instance']['instanceName'] === $instance_name) {
                         $instance_exists = true;
                         break;
                     }
@@ -359,35 +374,16 @@ class CompanyController {
             
             // Create instance if it doesn't exist
             if (!$instance_exists) {
-                $webhook_url = 'https://' . $_SERVER['HTTP_HOST'] . '/webhook/whatsapp.php';
+                $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
+                $webhook_url = $protocol . '://' . $_SERVER['HTTP_HOST'] . '/webhook/whatsapp.php';
                 
                 $create_data = [
                     'instanceName' => $instance_name,
-                    'token' => $api_token,
                     'qrcode' => true,
-                    'webhook' => $webhook_url,
-                    'webhook_by_events' => false,
-                    'events' => [
-                        'APPLICATION_STARTUP',
-                        'QRCODE_UPDATED',
-                        'MESSAGES_UPSERT',
-                        'MESSAGES_UPDATE',
-                        'MESSAGES_DELETE',
-                        'SEND_MESSAGE',
-                        'CONTACTS_SET',
-                        'CONTACTS_UPSERT',
-                        'CONTACTS_UPDATE',
-                        'PRESENCE_UPDATE',
-                        'CHATS_SET',
-                        'CHATS_UPSERT',
-                        'CHATS_UPDATE',
-                        'CHATS_DELETE',
-                        'GROUPS_UPSERT',
-                        'GROUP_UPDATE',
-                        'GROUP_PARTICIPANTS_UPDATE',
-                        'CONNECTION_UPDATE'
-                    ]
+                    'webhook' => $webhook_url
                 ];
+                
+                error_log("Creating instance with data: " . json_encode($create_data));
                 
                 $ch = curl_init();
                 curl_setopt($ch, CURLOPT_URL, "$api_url/instance/create");
@@ -396,17 +392,36 @@ class CompanyController {
                 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($create_data));
                 curl_setopt($ch, CURLOPT_HTTPHEADER, [
                     'Content-Type: application/json',
-                    'apikey: ' . $api_token
+                    'Authorization: Bearer ' . $api_token
                 ]);
                 curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
                 
                 $response = curl_exec($ch);
                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $curlError = curl_error($ch);
                 curl_close($ch);
+                
+                error_log("Evolution API create instance - HTTP: $httpCode, Response: $response, cURL Error: $curlError");
                 
                 if ($httpCode !== 201 && $httpCode !== 200) {
                     $error_data = json_decode($response, true);
-                    return ['success' => false, 'message' => $error_data['message'] ?? 'Erro ao criar instância'];
+                    $error_message = 'Erro ao criar instância';
+                    
+                    if (is_array($error_data) && isset($error_data['message'])) {
+                        $error_message = $error_data['message'];
+                    } elseif (is_array($error_data) && isset($error_data['error'])) {
+                        $error_message = $error_data['error'];
+                    } else {
+                        $error_message .= " (HTTP $httpCode): $response";
+                    }
+                    
+                    return ['success' => false, 'message' => $error_message];
+                }
+                
+                if ($curlError) {
+                    return ['success' => false, 'message' => "Erro cURL ao criar instância: $curlError"];
                 }
             }
             
@@ -416,25 +431,37 @@ class CompanyController {
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
                 'Content-Type: application/json',
-                'apikey: ' . $api_token
+                'Authorization: Bearer ' . $api_token
             ]);
             curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
             
             $response = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
             curl_close($ch);
+            
+            error_log("Evolution API connect instance - HTTP: $httpCode, Response: $response, cURL Error: $curlError");
+            
+            if ($curlError) {
+                return ['success' => false, 'message' => "Erro cURL ao conectar instância: $curlError"];
+            }
             
             if ($httpCode === 200) {
                 $qr_data = json_decode($response, true);
                 
-                if (isset($qr_data['base64'])) {
+                if (is_array($qr_data) && isset($qr_data['base64'])) {
                     return ['success' => true, 'qr_code' => $qr_data['base64']];
-                } elseif (isset($qr_data['instance']['state']) && $qr_data['instance']['state'] === 'open') {
+                } elseif (is_array($qr_data) && isset($qr_data['instance']['state']) && $qr_data['instance']['state'] === 'open') {
                     return ['success' => true, 'message' => 'Já conectado'];
+                } else {
+                    error_log("QR data structure unexpected: " . json_encode($qr_data));
+                    return ['success' => false, 'message' => "Resposta inesperada da API: " . json_encode($qr_data)];
                 }
+            } else {
+                return ['success' => false, 'message' => "Erro ao gerar QR Code (HTTP $httpCode): $response"];
             }
-            
-            return ['success' => false, 'message' => 'Erro ao gerar QR Code'];
             
         } catch (Exception $e) {
             error_log("Erro ao conectar WhatsApp: " . $e->getMessage());
@@ -454,19 +481,28 @@ class CompanyController {
             curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
                 'Content-Type: application/json',
-                'apikey: ' . $api_token
+                'Authorization: Bearer ' . $api_token
             ]);
             curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
             
             $response = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
             curl_close($ch);
+            
+            error_log("Evolution API disconnect - HTTP: $httpCode, Response: $response, cURL Error: $curlError");
+            
+            if ($curlError) {
+                return ['success' => false, 'message' => "Erro cURL ao desconectar: $curlError"];
+            }
             
             if ($httpCode === 200) {
                 return ['success' => true, 'message' => 'Desconectado com sucesso'];
             }
             
-            return ['success' => false, 'message' => 'Erro ao desconectar'];
+            return ['success' => false, 'message' => "Erro ao desconectar (HTTP $httpCode): $response"];
             
         } catch (Exception $e) {
             error_log("Erro ao desconectar WhatsApp: " . $e->getMessage());
