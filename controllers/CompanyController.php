@@ -508,43 +508,43 @@ class CompanyController {
             if ($httpCode === 200) {
                 $qr_data = json_decode($response, true);
                 
-                if (!is_array($connect_data)) {
+                if (!is_array($qr_data)) {
                     $json_error = json_last_error_msg();
                     $truncated_response = strlen($response) > 200 ? substr($response, 0, 200) . '...' : $response;
                     error_log("Invalid JSON response from connect endpoint. JSON Error: $json_error. Response: $response");
                     return ['success' => false, 'message' => "Resposta inválida da API Evolution (JSON Error: $json_error): $truncated_response"];
                 }
                 
-                error_log("Connect response structure: " . json_encode($connect_data, JSON_PRETTY_PRINT));
+                error_log("Connect response structure: " . json_encode($qr_data, JSON_PRETTY_PRINT));
                 
                 // Check for QR code in response
-                if (isset($connect_data['base64']) && !empty($connect_data['base64'])) {
+                if (isset($qr_data['base64']) && !empty($qr_data['base64'])) {
                     error_log("QR code found in response");
-                    return ['success' => true, 'qr_code' => $connect_data['base64']];
+                    return ['success' => true, 'qr_code' => $qr_data['base64']];
                 }
                 
                 // Check for QR code in nested structure
-                if (isset($connect_data['qrcode']['base64']) && !empty($connect_data['qrcode']['base64'])) {
+                if (isset($qr_data['qrcode']['base64']) && !empty($qr_data['qrcode']['base64'])) {
                     error_log("QR code found in nested qrcode structure");
-                    return ['success' => true, 'qr_code' => $connect_data['qrcode']['base64']];
+                    return ['success' => true, 'qr_code' => $qr_data['qrcode']['base64']];
                 }
                 
                 // Check for pairing code as alternative to QR code
-                if (isset($connect_data['pairingCode']) && !empty($connect_data['pairingCode'])) {
-                    error_log("Pairing code found in response: " . $connect_data['pairingCode']);
+                if (isset($qr_data['pairingCode']) && !empty($qr_data['pairingCode'])) {
+                    error_log("Pairing code found in response: " . $qr_data['pairingCode']);
                     return [
                         'success' => true, 
-                        'pairing_code' => $connect_data['pairingCode'],
-                        'message' => 'Use o código de pareamento: ' . $connect_data['pairingCode'] . '. Abra o WhatsApp > Dispositivos conectados > Conectar com código de telefone.'
+                        'pairing_code' => $qr_data['pairingCode'],
+                        'message' => 'Use o código de pareamento: ' . $qr_data['pairingCode'] . '. Abra o WhatsApp > Dispositivos conectados > Conectar com código de telefone.'
                     ];
                 }
                 
                 // Check instance state
                 $instance_state = null;
-                if (isset($connect_data['instance']['state'])) {
-                    $instance_state = $connect_data['instance']['state'];
-                } elseif (isset($connect_data['state'])) {
-                    $instance_state = $connect_data['state'];
+                if (isset($qr_data['instance']['state'])) {
+                    $instance_state = $qr_data['instance']['state'];
+                } elseif (isset($qr_data['state'])) {
+                    $instance_state = $qr_data['state'];
                 }
                 
                 if ($instance_state) {
@@ -582,11 +582,11 @@ class CompanyController {
                     error_log("No instance state found in response");
                     
                     // If no state but we have a response, try to extract any useful info
-                    if (isset($connect_data['message'])) {
-                        return ['success' => false, 'message' => "API Evolution: " . $connect_data['message']];
+                    if (isset($qr_data['message'])) {
+                        return ['success' => false, 'message' => "API Evolution: " . $qr_data['message']];
                     }
                     
-                    return ['success' => false, 'message' => "Não foi possível determinar o estado da instância. Resposta: " . json_encode($connect_data)];
+                    return ['success' => false, 'message' => "Não foi possível determinar o estado da instância. Resposta: " . json_encode($qr_data)];
                 }
             } else {
                 $error_data = json_decode($response, true);
