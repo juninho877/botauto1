@@ -12,38 +12,24 @@ class WhatsAppController {
         $this->serviceModel = new Service();
     }
     
-    public function processWebhook() {
+    public function handleMessageUpsert($messageData) {
         try {
-            $input = file_get_contents('php://input');
-            $data = json_decode($input, true);
-            
-            if (!$data) {
-                http_response_code(400);
-                echo json_encode(['error' => 'Invalid JSON']);
-                return;
-            }
-            
             // Log da mensagem recebida
-            error_log("WhatsApp Webhook: " . $input);
+            error_log("Processing message: " . json_encode($messageData));
             
             // Verificar se é uma mensagem de texto
-            if (isset($data['data']['key']['fromMe']) && $data['data']['key']['fromMe'] === false) {
-                $phone = $this->cleanPhone($data['data']['key']['remoteJid']);
-                $message = $data['data']['message']['conversation'] ?? 
-                          $data['data']['message']['extendedTextMessage']['text'] ?? '';
+            if (isset($messageData['key']['fromMe']) && $messageData['key']['fromMe'] === false) {
+                $phone = $this->cleanPhone($messageData['key']['remoteJid']);
+                $message = $messageData['message']['conversation'] ?? 
+                          $messageData['message']['extendedTextMessage']['text'] ?? '';
                 
                 if (!empty($message)) {
                     $this->processMessage($phone, $message);
                 }
             }
             
-            http_response_code(200);
-            echo json_encode(['status' => 'ok']);
-            
         } catch (Exception $e) {
-            error_log("Erro no webhook WhatsApp: " . $e->getMessage());
-            http_response_code(500);
-            echo json_encode(['error' => 'Internal server error']);
+            error_log("Erro ao processar mensagem WhatsApp: " . $e->getMessage());
         }
     }
     

@@ -22,28 +22,54 @@ try {
     // Log do webhook recebido
     error_log("WhatsApp Webhook received: " . $input);
     
-    // Processar eventos de conexão
-    if (isset($data['event']) && $data['event'] === 'connection.update') {
-        processConnectionUpdate($data);
+    $controller = new WhatsAppController();
+    
+    // Processar diferentes tipos de eventos
+    if (isset($data['event'])) {
+        switch ($data['event']) {
+            case 'connection.update':
+                processConnectionUpdate($data);
+                break;
+                
+            case 'qrcode.updated':
+                processQRCodeUpdate($data);
+                break;
+                
+            case 'messages.upsert':
+                // Processar mensagens recebidas
+                if (isset($data['data']) && is_array($data['data'])) {
+                    $controller->handleMessageUpsert($data['data']);
+                }
+                break;
+                
+            case 'messages.update':
+                // Log para debug - não precisa processar
+                error_log("Message update event: " . json_encode($data['data']));
+                break;
+                
+            case 'chats.update':
+            case 'chats.upsert':
+                // Log para debug - não precisa processar
+                error_log("Chat event ({$data['event']}): " . json_encode($data['data']));
+                break;
+                
+            case 'contacts.update':
+                // Log para debug - não precisa processar
+                error_log("Contact update event: " . json_encode($data['data']));
+                break;
+                
+            default:
+                error_log("Unknown webhook event: " . $data['event']);
+                break;
+        }
+    } else {
+        // Formato antigo (compatibilidade) - verificar se é mensagem
+        if (isset($data['data']['key']['fromMe']) && $data['data']['key']['fromMe'] === false) {
+            $controller->handleMessageUpsert($data['data']);
+        }
     }
     
-    // Processar eventos de QR Code
-    if (isset($data['event']) && $data['event'] === 'qrcode.updated') {
-        processQRCodeUpdate($data);
-    }
-    
-    // Processar mensagens
-    if (isset($data['event']) && $data['event'] === 'messages.upsert') {
-        $controller = new WhatsAppController();
-        $controller->processWebhook();
-    }
-    
-    // Processar mensagens no formato antigo (compatibilidade)
-    if (isset($data['data']['key']['fromMe']) && $data['data']['key']['fromMe'] === false) {
-        $controller = new WhatsAppController();
-        $controller->processWebhook();
-    }
-    
+    // Resposta única no final
     http_response_code(200);
     echo json_encode(['status' => 'ok']);
     
