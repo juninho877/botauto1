@@ -222,15 +222,34 @@ class CompanyController {
                 exit;
             }
             
-            $db = new Database();
-            $pdo = $db->getConnection();
+            // Get admin config for API calls
+            $stmt = $pdo->query("SELECT * FROM admin_config WHERE id = 1");
+            $config = $stmt->fetch();
             
             // Get company data
-            $stmt = $pdo->prepare("SELECT * FROM companies WHERE id = ?");
+            if (!$config) {
+                echo json_encode(['connected' => false, 'error' => 'API config not found']);
+                exit;
+            }
+            
+            // Get company instance name
+            $stmt = $pdo->prepare("SELECT whatsapp_instance FROM companies WHERE id = ?");
             $stmt->execute([$company_id]);
             $company = $stmt->fetch();
             
-            if (!$company) {
+            if (!$company || !$company['whatsapp_instance']) {
+                echo json_encode(['connected' => false, 'error' => 'Instance not configured']);
+                exit;
+            }
+            
+            // Check real connection state from Evolution API
+            $isConnected = $this->checkWhatsAppConnectionState($config, $company['whatsapp_instance']);
+            
+            // Update local database with real state
+            $stmt = $pdo->prepare("UPDATE companies SET whatsapp_connected = ? WHERE id = ?");
+            $stmt->execute([$isConnected ? 1 : 0, $company_id]);
+            
+            echo json_encode(['connected' => $isConnected]);
                 $_SESSION['error'] = 'Empresa não encontrada';
                 header('Location: /company/dashboard');
                 exit;
@@ -302,8 +321,8 @@ class CompanyController {
                             $_SESSION['success'] = 'Código de pareamento gerado! Use o código: ' . $result['pairing_code'];
                         } else {
                             $_SESSION['success'] = 'Instância conectada com sucesso!';
-                            $stmt = $pdo->prepare("UPDATE companies SET whatsapp_connected = 1 WHERE id = ?");
-                            $stmt->execute([$company_id]);
+                            // Don't update status here - let the check_status endpoint handle it
+                            // based on real API state
                         }
                         auditLog('whatsapp_connect_success', "WhatsApp conectado - Instância: $instance_name", $company_id, $_SESSION['user_id']);
                     } else {
@@ -350,6 +369,59 @@ class CompanyController {
         }
         
         include BASE_PATH . '/views/company/whatsapp.php';
+    }
+    
+    private function checkWhatsAppConnectionState($config, $instance_name) {
+        try {
+            $api_url = rtrim($config['api_whatsapp_url'], '/');
+            $api_token = $config['api_whatsapp_token'];
+            
+            error_log("Checking connection state for instance: $instance_name");
+            
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, "$api_url/instance/connectionState/$instance_name");
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'apikey: ' . $api_token
+            ]);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+            
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
+            curl_close($ch);
+            
+            error_log("Connection state check - HTTP: $httpCode, Response: $response, cURL Error: $curlError");
+            
+            if ($curlError) {
+                error_log("cURL error checking connection state: $curlError");
+                return false;
+            }
+            
+            if ($httpCode === 200) {
+                $data = json_decode($response, true);
+                
+                if (is_array($data) && isset($data['instance']['state'])) {
+                    $state = $data['instance']['state'];
+                    error_log("Instance state: $state");
+                    
+                    // Return true only if state is 'open' (connected)
+                    return $state === 'open';
+                } else {
+                    error_log("Invalid response structure for connection state");
+                    return false;
+                }
+            } else {
+                error_log("HTTP error checking connection state: $httpCode - $response");
+                return false;
+            }
+            
+        } catch (Exception $e) {
+            error_log("Exception checking WhatsApp connection state: " . $e->getMessage());
+            return false;
+        }
     }
     
     private function connectWhatsAppInstance($config, $instance_name, $phone) {

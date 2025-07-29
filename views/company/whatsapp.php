@@ -370,8 +370,17 @@ function checkConnectionStatus() {
                 <span class="status-badge status-confirmado">Conectado</span>
                 <p class="text-muted mt-3">WhatsApp conectado com sucesso!</p>
             `;
-            // Reload page after 2 seconds to update the interface
-            setTimeout(() => location.reload(), 2000);
+            
+            // Hide QR code and pairing code sections if they exist
+            const qrSection = document.getElementById('qrCodeSection');
+            const pairingSection = document.getElementById('pairingCodeSection');
+            if (qrSection) qrSection.style.display = 'none';
+            if (pairingSection) pairingSection.style.display = 'none';
+            
+            // Show success message and reload after delay
+            setTimeout(() => {
+                location.reload();
+            }, 3000);
         } else {
             statusDiv.innerHTML = `
                 <i class="bi bi-whatsapp text-warning display-1 mb-3"></i>
@@ -398,13 +407,13 @@ function checkConnectionStatus() {
 let qrRefreshInterval = setInterval(() => {
     const qrSection = document.getElementById('qrCodeSection');
     if (qrSection && qrSection.style.display !== 'none') {
-        console.log('Auto-refreshing QR code...');
-        location.reload();
+        console.log('Auto-checking connection status...');
+        checkConnectionStatus();
     } else {
         // Clear interval if QR section is not visible
         clearInterval(qrRefreshInterval);
     }
-}, 120000); // 2 minutes
+}, 10000); // Check every 10 seconds
 
 // Add manual refresh button functionality
 function refreshQRCode() {
