@@ -1,6 +1,6 @@
 <?php 
 $title = 'Dashboard - ' . $_SESSION['user_name'];
-include 'views/layouts/header.php'; 
+include BASE_PATH . '/views/layouts/header.php'; 
 ?>
 
 <div class="container-fluid">
@@ -354,4 +354,4 @@ const statusChart = new Chart(statusCtx, {
 });
 </script>
 
-<?php include 'views/layouts/footer.php'; ?>
+<?php include BASE_PATH . '/views/layouts/footer.php'; ?>

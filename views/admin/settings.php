@@ -1,6 +1,6 @@
 <?php 
 $title = 'Configurações do Sistema - Admin';
-include 'views/layouts/header.php'; 
+include BASE_PATH . '/views/layouts/header.php'; 
 ?>
 
 <div class="container-fluid">
@@ -296,4 +296,4 @@ document.addEventListener('DOMContentLoaded', function() {
 })();
 </script>
 
-<?php include 'views/layouts/footer.php'; ?>
+<?php include BASE_PATH . '/views/layouts/footer.php'; ?>

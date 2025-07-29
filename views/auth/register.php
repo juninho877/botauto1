@@ -1,6 +1,6 @@
 <?php 
 $title = 'Cadastro de Empresa - Sistema SaaS WhatsApp';
-include 'views/layouts/header.php'; 
+include BASE_PATH . '/views/layouts/header.php'; 
 ?>
 
 <div class="container-fluid">
@@ -185,4 +185,4 @@ document.getElementById('confirmar_senha').addEventListener('input', function() 
 })();
 </script>
 
-<?php include 'views/layouts/footer.php'; ?>
+<?php include BASE_PATH . '/views/layouts/footer.php'; ?>
