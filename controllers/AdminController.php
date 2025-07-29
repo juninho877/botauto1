@@ -129,7 +129,9 @@ class AdminController {
                     api_whatsapp_token = ?, 
                     openai_key = ?, 
                     gemini_key = ?, 
-                    ia_padrao = ?
+                    ia_padrao = ?,
+                    chatgpt_model = ?,
+                    gemini_model = ?
                     WHERE id = 1
                 ");
                 
@@ -138,7 +140,9 @@ class AdminController {
                     sanitize($_POST['api_whatsapp_token']),
                     sanitize($_POST['openai_key']),
                     sanitize($_POST['gemini_key']),
-                    sanitize($_POST['ia_padrao'])
+                    sanitize($_POST['ia_padrao']),
+                    sanitize($_POST['chatgpt_model'] ?? 'gpt-3.5-turbo'),
+                    sanitize($_POST['gemini_model'] ?? 'gemini-1.5-flash')
                 ])) {
                     $_SESSION['success'] = 'Configurações atualizadas com sucesso!';
                     auditLog('admin_settings_updated', 'Configurações globais atualizadas', null, $_SESSION['user_id']);

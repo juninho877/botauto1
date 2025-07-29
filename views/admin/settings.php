@@ -122,6 +122,36 @@ include BASE_PATH . '/views/layouts/header.php';
                                     <div class="form-text">IA utilizada quando a empresa não especifica preferência</div>
                                 </div>
                                 <div class="col-md-4 mb-3">
+                                    <label for="chatgpt_model" class="form-label">Modelo ChatGPT</label>
+                                    <select class="form-select" id="chatgpt_model" name="chatgpt_model">
+                                        <option value="gpt-3.5-turbo" <?= ($config['chatgpt_model'] ?? 'gpt-3.5-turbo') === 'gpt-3.5-turbo' ? 'selected' : '' ?>>
+                                            GPT-3.5 Turbo (Rápido e Econômico)
+                                        </option>
+                                        <option value="gpt-4" <?= ($config['chatgpt_model'] ?? '') === 'gpt-4' ? 'selected' : '' ?>>
+                                            GPT-4 (Mais Inteligente)
+                                        </option>
+                                        <option value="gpt-4-turbo" <?= ($config['chatgpt_model'] ?? '') === 'gpt-4-turbo' ? 'selected' : '' ?>>
+                                            GPT-4 Turbo (Balanceado)
+                                        </option>
+                                    </select>
+                                    <div class="form-text">Modelo específico do ChatGPT a ser usado</div>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="gemini_model" class="form-label">Modelo Gemini</label>
+                                    <select class="form-select" id="gemini_model" name="gemini_model">
+                                        <option value="gemini-1.5-flash" <?= ($config['gemini_model'] ?? 'gemini-1.5-flash') === 'gemini-1.5-flash' ? 'selected' : '' ?>>
+                                            Gemini 1.5 Flash (Rápido)
+                                        </option>
+                                        <option value="gemini-1.5-pro" <?= ($config['gemini_model'] ?? '') === 'gemini-1.5-pro' ? 'selected' : '' ?>>
+                                            Gemini 1.5 Pro (Avançado)
+                                        </option>
+                                        <option value="gemini-1.0-pro" <?= ($config['gemini_model'] ?? '') === 'gemini-1.0-pro' ? 'selected' : '' ?>>
+                                            Gemini 1.0 Pro (Estável)
+                                        </option>
+                                    </select>
+                                    <div class="form-text">Modelo específico do Gemini a ser usado</div>
+                                </div>
+                                <div class="col-md-4 mb-3">
                                     <label for="openai_key" class="form-label">Chave da API OpenAI</label>
                                     <div class="input-group">
                                         <input type="password" class="form-control" id="openai_key" name="openai_key" 
@@ -133,7 +163,7 @@ include BASE_PATH . '/views/layouts/header.php';
                                     </div>
                                     <div class="form-text">Para usar ChatGPT</div>
                                 </div>
-                                <div class="col-md-4 mb-3">
+                                <div class="col-md-8 mb-3">
                                     <label for="gemini_key" class="form-label">Chave da API Gemini</label>
                                     <div class="input-group">
                                         <input type="password" class="form-control" id="gemini_key" name="gemini_key" 
