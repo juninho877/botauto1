@@ -34,6 +34,7 @@ class CompanyController {
         $recent_appointments = $this->companyModel->getAppointments($company_id, 10);
         
         include 'views/company/dashboard.php';
+        include BASE_PATH . '/views/company/dashboard.php';
     }
     
     public function services() {
@@ -96,6 +97,7 @@ class CompanyController {
         
         $services = $this->serviceModel->getByCompany($company_id, false);
         include 'views/company/services.php';
+        include BASE_PATH . '/views/company/services.php';
     }
     
     public function appointments() {
@@ -122,6 +124,7 @@ class CompanyController {
         
         $appointments = $this->companyModel->getAppointments($company_id);
         include 'views/company/appointments.php';
+        include BASE_PATH . '/views/company/appointments.php';
     }
     
     public function calendar() {
@@ -185,6 +188,7 @@ class CompanyController {
         }
         
         include 'views/company/calendar.php';
+        include BASE_PATH . '/views/company/calendar.php';
     }
     
     public function conversations() {
@@ -201,6 +205,7 @@ class CompanyController {
         
         $conversations = $this->companyModel->getConversations($company_id);
         include 'views/company/conversations.php';
+        include BASE_PATH . '/views/company/conversations.php';
     }
     
     public function whatsapp() {
@@ -221,6 +226,7 @@ class CompanyController {
         }
         
         include 'views/company/whatsapp.php';
+        include BASE_PATH . '/views/company/whatsapp.php';
     }
 }
 ?>

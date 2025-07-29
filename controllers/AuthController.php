@@ -45,6 +45,7 @@ class AuthController {
         }
         
         include 'views/auth/login.php';
+        include BASE_PATH . '/views/auth/login.php';
     }
     
     public function logout() {
@@ -111,6 +112,7 @@ class AuthController {
         }
         
         include 'views/auth/register.php';
+        include BASE_PATH . '/views/auth/register.php';
     }
 }
 ?>
