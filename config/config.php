@@ -24,35 +24,6 @@ header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('X-XSS-Protection: 1; mode=block');
 
-// Configurações de debug (apenas para desenvolvimento)
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
-ini_set('log_errors', 1);
-ini_set('error_log', BASE_PATH . '/logs/php_errors.log');
-
-// Criar diretório de logs se não existir
-if (!file_exists(BASE_PATH . '/logs')) {
-    mkdir(BASE_PATH . '/logs', 0755, true);
-}
-
-// Função para log personalizado do WhatsApp
-function whatsappLog($message, $data = null) {
-    $timestamp = date('Y-m-d H:i:s');
-    $logMessage = "[$timestamp] WHATSAPP: $message";
-    
-    if ($data !== null) {
-        $logMessage .= " | DATA: " . json_encode($data, JSON_UNESCAPED_UNICODE);
-    }
-    
-    $logMessage .= "\n";
-    
-    // Log para arquivo específico do WhatsApp
-    file_put_contents(BASE_PATH . '/logs/whatsapp.log', $logMessage, FILE_APPEND | LOCK_EX);
-    
-    // Log também para error_log padrão
-    error_log($logMessage);
-}
-
 // Função para verificar timeout de sessão
 function checkSessionTimeout() {
     if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > SESSION_TIMEOUT)) {

@@ -41,6 +41,19 @@ class WhatsAppController {
             $db = new Database();
             $pdo = $db->getConnection();
             
+            // Inicializar dados de fluxo na sessão se não existir
+            if (!isset($_SESSION['whatsapp_flow_data'])) {
+                $_SESSION['whatsapp_flow_data'] = [];
+            }
+            
+            // Recuperar estado do fluxo para este telefone
+            $flow_data = $_SESSION['whatsapp_flow_data'][$phone] ?? [
+                'in_flow' => false,
+                'flow_type' => null,
+                'step' => null,
+                'schedule_data' => []
+            ];
+            
             // Identificar empresa pela instância do webhook
             // Por enquanto, usar primeira empresa ativa
             $stmt = $pdo->query("SELECT * FROM companies WHERE ativo = 1 LIMIT 1");
@@ -88,9 +101,21 @@ class WhatsAppController {
             $conversationContext = $this->getConversationContext($conversation_id, 5);
             
             // Processar com IA
-            $response = $this->processWithAI($message, $company, $phone, $conversationContext);
+            $aiResponse = $this->processWithAI($message, $company, $phone, $conversationContext, $flow_data);
             
-            if ($response) {
+            if ($aiResponse && isset($aiResponse['message'])) {
+                $response = $aiResponse['message'];
+                
+                // Atualizar dados do fluxo na sessão
+                if (isset($aiResponse['flow_data'])) {
+                    $_SESSION['whatsapp_flow_data'][$phone] = $aiResponse['flow_data'];
+                }
+                
+                // Limpar dados do fluxo se concluído ou com erro
+                if (isset($aiResponse['status']) && in_array($aiResponse['status'], ['completed', 'error', 'cancelled'])) {
+                    unset($_SESSION['whatsapp_flow_data'][$phone]);
+                }
+                
                 // Enviar resposta
                 $this->sendMessage($phone, $response, $company);
                 
@@ -127,7 +152,7 @@ class WhatsAppController {
         }
     }
     
-    private function processWithAI($message, $company, $phone, $conversationContext = []) {
+    private function processWithAI($message, $company, $phone, $conversationContext = [], $flow_data = []) {
         try {
             $db = new Database();
             $pdo = $db->getConnection();
@@ -158,15 +183,47 @@ class WhatsAppController {
             
             error_log("WHATSAPP AI: Analisando mensagem: '$message' para empresa: {$company['nome']}");
             
-            // Verificar se estamos em um fluxo de agendamento
-            $flowState = $this->getFlowState($conversationContext);
-            error_log("WHATSAPP AI: Estado do fluxo: " . json_encode($flowState));
-            
-            if ($flowState['in_flow']) {
-                return $this->continueFlow($message, $context, $phone, $flowState);
+            // Se estamos em um fluxo ativo, continuar o fluxo
+            if (isset($flow_data['in_flow']) && $flow_data['in_flow']) {
+                error_log("WHATSAPP AI: Continuando fluxo ativo - Passo: " . ($flow_data['step'] ?? 'unknown'));
+                
+                $scheduleResponse = $this->aiController->processScheduleRequest($message, $context, $phone, $flow_data);
+                
+                // Se o agendamento foi completado, finalizar
+                if (isset($scheduleResponse['status']) && $scheduleResponse['status'] === 'completed') {
+                    $scheduleData = $scheduleResponse['flow_data']['schedule_data'];
+                    
+                    $success = $this->aiController->finalizeAppointment(
+                        $company['id'],
+                        $scheduleData['client_name'],
+                        $phone,
+                        $scheduleData['service_id'],
+                        $scheduleData['date'],
+                        $scheduleData['time'],
+                        $scheduleData['service_duration'],
+                        $scheduleData['service_price']
+                    );
+                    
+                    if ($success) {
+                        $scheduleResponse['message'] = "✅ Agendamento confirmado para *{$scheduleData['client_name']}*!\n\n";
+                        $scheduleResponse['message'] .= "📅 Data: " . date('d/m/Y', strtotime($scheduleData['date'])) . "\n";
+                        $scheduleResponse['message'] .= "🕒 Horário: {$scheduleData['time']}\n";
+                        $scheduleResponse['message'] .= "💼 Serviço: {$scheduleData['service_name']}\n";
+                        $scheduleResponse['message'] .= "💰 Valor: R$ " . number_format($scheduleData['service_price'], 2, ',', '.') . "\n\n";
+                        $scheduleResponse['message'] .= "Você receberá um lembrete 1 dia antes do seu horário.\n\n";
+                        $scheduleResponse['message'] .= "Obrigado por escolher nossos serviços! 😊\n\nPrecisa de mais alguma coisa?";
+                        
+                        auditLog('whatsapp_appointment_completed', "Agendamento finalizado via WhatsApp para $phone", $company['id']);
+                    } else {
+                        $scheduleResponse['message'] = "❌ Desculpe, ocorreu um erro ao finalizar seu agendamento. Tente novamente ou entre em contato conosco.";
+                        $scheduleResponse['status'] = 'error';
+                    }
+                }
+                
+                return $scheduleResponse;
             }
             
-            // Analisar intenção do usuário
+            // Analisar intenção do usuário para nova conversa
             $intent = $this->aiController->analyzeIntent($message, $context);
             error_log("WHATSAPP AI: Intenção detectada: " . json_encode($intent));
             
@@ -175,9 +232,13 @@ class WhatsAppController {
                 switch ($intent['action']) {
                     case 'schedule':
                         error_log("WHATSAPP AI: Processando solicitação de agendamento");
-                        $scheduleResponse = $this->aiController->processScheduleRequest($intent, $context, $phone);
+                        
+                        // Iniciar novo fluxo de agendamento
+                        $newFlowData = ['in_flow' => true, 'flow_type' => 'schedule', 'step' => 'start', 'schedule_data' => []];
+                        $scheduleResponse = $this->aiController->processScheduleRequest($message, $context, $phone, $newFlowData);
+                        
                         if (isset($scheduleResponse['message'])) {
-                            return $scheduleResponse['message'];
+                            return $scheduleResponse;
                         }
                         break;
                         
@@ -189,7 +250,7 @@ class WhatsAppController {
                         
                     case 'info':
                         if ($intent['type'] === 'services') {
-                            return $this->buildServicesInfo($context['servicos']);
+                            return ['message' => $this->buildServicesInfo($context['servicos']), 'status' => 'info'];
                         }
                         break;
                 }
@@ -200,228 +261,23 @@ class WhatsAppController {
             
             if ($ia_tipo === 'chatgpt' && !empty($config['openai_key'])) {
                 $prompt = $this->aiController->buildPrompt($message, $context);
-                return $this->processWithChatGPT($prompt, $config['openai_key']);
+                $aiMessage = $this->processWithChatGPT($prompt, $config['openai_key'], $conversationContext);
+                return ['message' => $aiMessage, 'status' => 'ai_response'];
             } elseif ($ia_tipo === 'gemini' && !empty($config['gemini_key'])) {
                 $prompt = $this->aiController->buildPrompt($message, $context);
-                return $this->processWithGemini($prompt, $config['gemini_key']);
+                $aiMessage = $this->processWithGemini($prompt, $config['gemini_key'], $conversationContext);
+                return ['message' => $aiMessage, 'status' => 'ai_response'];
             }
             
             // Fallback para resposta simples
             error_log("WHATSAPP AI: Usando bot simples (sem chaves de IA configuradas)");
-            return $this->processWithSimpleBot($message, $context);
+            $simpleMessage = $this->processWithSimpleBot($message, $context, $conversationContext);
+            return ['message' => $simpleMessage, 'status' => 'simple_bot'];
             
         } catch (Exception $e) {
             error_log("Erro no processamento de IA: " . $e->getMessage());
-            return "Desculpe, estou com problemas técnicos. Tente novamente mais tarde.";
+            return ['message' => "Desculpe, estou com problemas técnicos. Tente novamente mais tarde.", 'status' => 'error'];
         }
-    }
-    
-    private function getFlowState($conversationContext) {
-        $state = [
-            'in_flow' => false,
-            'flow_type' => null,
-            'step' => null,
-            'data' => []
-        ];
-        
-        if (empty($conversationContext)) {
-            return $state;
-        }
-        
-        // Analisar últimas mensagens para detectar fluxo ativo
-        $lastBotMessage = null;
-        foreach (array_reverse($conversationContext) as $msg) {
-            if ($msg['tipo'] === 'enviada') {
-                $lastBotMessage = $msg['conteudo'];
-                break;
-            }
-        }
-        
-        if (!$lastBotMessage) {
-            return $state;
-        }
-        
-        // Detectar fluxo de agendamento
-        if (strpos($lastBotMessage, 'Qual serviço você gostaria de agendar?') !== false) {
-            $state['in_flow'] = true;
-            $state['flow_type'] = 'schedule';
-            $state['step'] = 'waiting_service';
-        } elseif (strpos($lastBotMessage, 'Para qual data você gostaria de agendar') !== false) {
-            $state['in_flow'] = true;
-            $state['flow_type'] = 'schedule';
-            $state['step'] = 'waiting_date';
-        } elseif (strpos($lastBotMessage, 'Horários disponíveis para') !== false && strpos($lastBotMessage, 'Qual horário prefere?') !== false) {
-            $state['in_flow'] = true;
-            $state['flow_type'] = 'schedule';
-            $state['step'] = 'waiting_time';
-        } elseif (strpos($lastBotMessage, 'Qual é o seu nome para confirmarmos') !== false) {
-            $state['in_flow'] = true;
-            $state['flow_type'] = 'schedule';
-            $state['step'] = 'waiting_name';
-        }
-        
-        return $state;
-    }
-    
-    private function continueFlow($message, $context, $phone, $flowState) {
-        error_log("WHATSAPP AI: Continuando fluxo - Tipo: {$flowState['flow_type']}, Passo: {$flowState['step']}");
-        
-        if ($flowState['flow_type'] === 'schedule') {
-            return $this->continueScheduleFlow($message, $context, $phone, $flowState['step']);
-        }
-        
-        return "Desculpe, não entendi. Pode repetir?";
-    }
-    
-    private function continueScheduleFlow($message, $context, $phone, $step) {
-        $services = $context['servicos'];
-        
-        switch ($step) {
-            case 'waiting_service':
-                // Cliente escolheu um serviço
-                $selectedService = null;
-                $message_lower = strtolower($message);
-                
-                // Tentar encontrar serviço por nome ou número
-                foreach ($services as $index => $service) {
-                    $service_name = strtolower($service['nome']);
-                    if (strpos($message_lower, $service_name) !== false || 
-                        strpos($message, (string)($index + 1)) !== false) {
-                        $selectedService = $service;
-                        break;
-                    }
-                }
-                
-                if (!$selectedService) {
-                    return "Não encontrei esse serviço. Por favor, escolha um dos serviços listados ou digite o número correspondente.";
-                }
-                
-                return "Perfeito! Você escolheu *{$selectedService['nome']}* ({$selectedService['duracao_minutos']}min - R$ {$selectedService['preco']}).\n\nPara qual data você gostaria de agendar? Pode ser hoje, amanhã, ou uma data específica (ex: 15/01).";
-                
-            case 'waiting_date':
-                // Cliente informou uma data
-                $date = $this->extractDateFromMessage($message);
-                
-                if (!$date) {
-                    return "Não consegui entender a data. Pode me informar de forma mais clara? Por exemplo: 'amanhã', 'sexta-feira' ou '15/01'.";
-                }
-                
-                // Buscar serviço selecionado (precisaríamos armazenar isso)
-                // Por simplicidade, vamos usar o primeiro serviço
-                $service = $services[0];
-                $available_slots = $this->appointmentModel->getAvailableSlots($context['empresa']['id'], $service['id'], $date);
-                
-                if (empty($available_slots)) {
-                    return "Infelizmente não temos horários disponíveis para " . date('d/m/Y', strtotime($date)) . ". Gostaria de escolher outra data?";
-                }
-                
-                $response = "Horários disponíveis para " . date('d/m/Y', strtotime($date)) . ":\n\n";
-                foreach ($available_slots as $slot) {
-                    $response .= "• $slot\n";
-                }
-                $response .= "\nQual horário prefere?";
-                return $response;
-                
-            case 'waiting_time':
-                // Cliente escolheu um horário
-                $time = $this->extractTimeFromMessage($message);
-                
-                if (!$time) {
-                    return "Não consegui entender o horário. Pode escolher um dos horários disponíveis listados acima?";
-                }
-                
-                return "Ótimo! Seu agendamento será:\n\n📅 Data: [data]\n🕒 Horário: $time\n💼 Serviço: [serviço]\n💰 Valor: R$ [valor]\n\nQual é o seu nome para confirmarmos o agendamento?";
-                
-            case 'waiting_name':
-                // Cliente informou o nome
-                $name = trim($message);
-                
-                if (strlen($name) < 2) {
-                    return "Por favor, me informe seu nome completo para confirmar o agendamento.";
-                }
-                
-                // Aqui criaria o agendamento de fato
-                return "✅ Agendamento confirmado para *$name*!\n\nVocê receberá um lembrete 1 dia antes do seu horário.\n\nObrigado por escolher nossos serviços! 😊\n\nPrecisa de mais alguma coisa?";
-        }
-        
-        return "Desculpe, houve um problema no fluxo. Vamos começar novamente?";
-    }
-    
-    private function extractDateFromMessage($message) {
-        $today = new DateTime();
-        $message_lower = strtolower($message);
-        
-        // Hoje, amanhã
-        if (strpos($message_lower, 'hoje') !== false) {
-            return $today->format('Y-m-d');
-        }
-        
-        if (strpos($message_lower, 'amanhã') !== false || strpos($message_lower, 'amanha') !== false) {
-            return $today->modify('+1 day')->format('Y-m-d');
-        }
-        
-        // Dias da semana
-        $days = [
-            'segunda' => 'next monday',
-            'terça' => 'next tuesday', 'terca' => 'next tuesday',
-            'quarta' => 'next wednesday',
-            'quinta' => 'next thursday',
-            'sexta' => 'next friday',
-            'sábado' => 'next saturday', 'sabado' => 'next saturday',
-            'domingo' => 'next sunday'
-        ];
-        
-        foreach ($days as $day_pt => $day_en) {
-            if (strpos($message_lower, $day_pt) !== false) {
-                $date = new DateTime($day_en);
-                if ($date <= $today) {
-                    $date->modify('+1 week');
-                }
-                return $date->format('Y-m-d');
-            }
-        }
-        
-        // Formato DD/MM
-        if (preg_match('/(\d{1,2})\/(\d{1,2})/', $message, $matches)) {
-            $day = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
-            $month = str_pad($matches[2], 2, '0', STR_PAD_LEFT);
-            $year = date('Y');
-            
-            $date = DateTime::createFromFormat('Y-m-d', "$year-$month-$day");
-            if ($date && $date >= $today) {
-                return $date->format('Y-m-d');
-            }
-        }
-        
-        return null;
-    }
-    
-    private function extractTimeFromMessage($message) {
-        // Formato HH:MM
-        if (preg_match('/(\d{1,2}):(\d{2})/', $message, $matches)) {
-            return str_pad($matches[1], 2, '0', STR_PAD_LEFT) . ':' . $matches[2];
-        }
-        
-        // Formato HHh
-        if (preg_match('/(\d{1,2})h/', $message, $matches)) {
-            return str_pad($matches[1], 2, '0', STR_PAD_LEFT) . ':00';
-        }
-        
-        // Horários específicos mencionados
-        $message_lower = strtolower($message);
-        $times = [
-            '8' => '08:00', '9' => '09:00', '10' => '10:00', '11' => '11:00',
-            '12' => '12:00', '13' => '13:00', '14' => '14:00', '15' => '15:00',
-            '16' => '16:00', '17' => '17:00', '18' => '18:00', '19' => '19:00'
-        ];
-        
-        foreach ($times as $hour => $time) {
-            if (strpos($message, $hour) !== false) {
-                return $time;
-            }
-        }
-        
-        return null;
     }
     private function handleCancelRequest($context, $phone) {
         $recent_appointments = $context['agendamentos_recentes'];
@@ -487,7 +343,7 @@ class WhatsAppController {
         return $response;
     }
     
-    private function processWithChatGPT($prompt, $api_key) {
+    private function processWithChatGPT($prompt, $api_key, $conversationContext = []) {
         error_log("WHATSAPP AI: Enviando para ChatGPT: " . substr($prompt, 0, 200) . "...");
         
         $data = [
@@ -535,7 +391,7 @@ class WhatsAppController {
         return "Desculpe, estou com problemas técnicos. Tente novamente mais tarde.";
     }
     
-    private function processWithGemini($prompt, $api_key) {
+    private function processWithGemini($prompt, $api_key, $conversationContext = []) {
         error_log("WHATSAPP AI: Enviando para Gemini: " . substr($prompt, 0, 200) . "...");
         
         $data = [
@@ -576,13 +432,34 @@ class WhatsAppController {
         return "Desculpe, estou com problemas técnicos. Tente novamente mais tarde.";
     }
     
-    private function processWithSimpleBot($message, $context) {
+    private function processWithSimpleBot($message, $context, $conversationContext = []) {
         error_log("WHATSAPP AI: Usando bot simples para: '$message'");
         $message_lower = strtolower($message);
         
+        // Verificar se já houve saudação recente
+        $recentGreeting = false;
+        if (!empty($conversationContext)) {
+            foreach (array_reverse($conversationContext) as $msg) {
+                if ($msg['tipo'] === 'enviada' && 
+                    (strpos($msg['conteudo'], 'Bem-vindo') !== false || 
+                     strpos($msg['conteudo'], 'Olá!') !== false)) {
+                    $recentGreeting = true;
+                    break;
+                }
+                // Parar de verificar após 3 mensagens
+                if (count(array_slice(array_reverse($conversationContext), 0, array_search($msg, array_reverse($conversationContext)) + 1)) >= 3) {
+                    break;
+                }
+            }
+        }
+        
         // Saudações
         if (preg_match('/\b(oi|olá|ola|bom dia|boa tarde|boa noite)\b/', $message_lower)) {
-            return "Olá! Bem-vindo(a) ao {$context['empresa']['nome']}! 😊\n\nComo posso ajudá-lo(a) hoje? Posso:\n• Mostrar nossos serviços\n• Ajudar com agendamentos\n• Verificar disponibilidade\n\nO que gostaria de fazer?";
+            if ($recentGreeting) {
+                return "Olá novamente! Como posso ajudar hoje? 😊";
+            } else {
+                return "Olá! Bem-vindo(a) ao {$context['empresa']['nome']}! 😊\n\nComo posso ajudá-lo(a) hoje? Posso:\n• Mostrar nossos serviços\n• Ajudar com agendamentos\n• Verificar disponibilidade\n\nO que gostaria de fazer?";
+            }
         }
         
         // Solicitar serviços
