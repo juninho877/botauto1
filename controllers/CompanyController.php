@@ -207,12 +207,12 @@ class CompanyController {
         $company_id = $_SESSION['user_id'];
         
         try {
+            $db = new Database();
+            $pdo = $db->getConnection();
+            
             // Handle AJAX status check
             if (isset($_GET['action']) && $_GET['action'] === 'check_status') {
                 header('Content-Type: application/json');
-                
-                $db = new Database();
-                $pdo = $db->getConnection();
                 
                 $stmt = $pdo->prepare("SELECT whatsapp_connected FROM companies WHERE id = ?");
                 $stmt->execute([$company_id]);
@@ -222,34 +222,12 @@ class CompanyController {
                 exit;
             }
             
-            // Get admin config for API calls
-            $stmt = $pdo->query("SELECT * FROM admin_config WHERE id = 1");
-            $config = $stmt->fetch();
-            
             // Get company data
-            if (!$config) {
-                echo json_encode(['connected' => false, 'error' => 'API config not found']);
-                exit;
-            }
-            
-            // Get company instance name
-            $stmt = $pdo->prepare("SELECT whatsapp_instance FROM companies WHERE id = ?");
+            $stmt = $pdo->prepare("SELECT * FROM companies WHERE id = ?");
             $stmt->execute([$company_id]);
             $company = $stmt->fetch();
             
-            if (!$company || !$company['whatsapp_instance']) {
-                echo json_encode(['connected' => false, 'error' => 'Instance not configured']);
-                exit;
-            }
-            
-            // Check real connection state from Evolution API
-            $isConnected = $this->checkWhatsAppConnectionState($config, $company['whatsapp_instance']);
-            
-            // Update local database with real state
-            $stmt = $pdo->prepare("UPDATE companies SET whatsapp_connected = ? WHERE id = ?");
-            $stmt->execute([$isConnected ? 1 : 0, $company_id]);
-            
-            echo json_encode(['connected' => $isConnected]);
+            if (!$company) {
                 $_SESSION['error'] = 'Empresa não encontrada';
                 header('Location: /company/dashboard');
                 exit;
@@ -287,16 +265,16 @@ class CompanyController {
                 unset($_SESSION['pairing_code_data']);
             }
             
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!verifyCSRFToken($_POST['csrf_token'])) {
                     $_SESSION['error'] = 'Token CSRF inválido';
                     header('Location: /company/whatsapp');
                     exit;
                 }
                 
-            $action = $_POST['action'];
-            
-            if ($action === 'connect') {
+                $action = $_POST['action'];
+                
+                if ($action === 'connect') {
                     $phone = sanitize($_POST['phone'] ?? '');
                     
                     if (empty($phone)) {
@@ -321,8 +299,6 @@ class CompanyController {
                             $_SESSION['success'] = 'Código de pareamento gerado! Use o código: ' . $result['pairing_code'];
                         } else {
                             $_SESSION['success'] = 'Instância conectada com sucesso!';
-                            // Don't update status here - let the check_status endpoint handle it
-                            // based on real API state
                         }
                         auditLog('whatsapp_connect_success', "WhatsApp conectado - Instância: $instance_name", $company_id, $_SESSION['user_id']);
                     } else {
@@ -351,12 +327,12 @@ class CompanyController {
                     } else {
                         $_SESSION['error'] = 'Erro ao atualizar configurações de IA';
                     }
+                }
+                
+                header('Location: /company/whatsapp');
+                exit;
             }
             
-            header('Location: /company/whatsapp');
-            exit;
-        }
-        
         } catch (Exception $e) {
             error_log("Erro na página WhatsApp: " . $e->getMessage());
             $_SESSION['error'] = 'Erro interno do sistema';
@@ -711,7 +687,6 @@ class CompanyController {
         } catch (Exception $e) {
             error_log("Erro ao conectar WhatsApp: " . $e->getMessage());
             return ['success' => false, 'message' => 'Erro interno ao conectar'];
-        }
         }
     }
     
