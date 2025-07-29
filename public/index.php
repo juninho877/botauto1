@@ -15,6 +15,15 @@ if (strpos($path, '/webhook/') === 0) {
     $webhookFile = substr($path, 9); // Remove '/webhook/' do início
     if (empty($webhookFile)) {
         $webhookFile = 'index.php'; // Arquivo padrão se não especificado
+    } else {
+        // Extrair apenas o nome do arquivo PHP, ignorando subcaminhos adicionais
+        // Por exemplo: 'whatsapp.php/messages-update' -> 'whatsapp.php'
+        $webhookFile = strtok($webhookFile, '/');
+        
+        // Se não terminar com .php, adicionar a extensão
+        if (!empty($webhookFile) && !str_ends_with($webhookFile, '.php')) {
+            $webhookFile .= '.php';
+        }
     }
     
     $webhookPath = __DIR__ . '/../webhook/' . $webhookFile;
